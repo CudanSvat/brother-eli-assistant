@@ -34,5 +34,5 @@ if (merged.side !== "buy") throw new Error("expected buy");
 if (merged.tokenAmount !== 1000n) throw new Error(`token ${merged.tokenAmount}`);
 if (merged.quoteAmount !== 100n) throw new Error(`quote ${merged.quoteAmount}`);
 if (!merged.quoteAddress.endsWith("dc7")) throw new Error(`quote token ${merged.quoteAddress}`);
-if (merged.hopCount !== 2) throw new Error(`hops ${merged.hopCount}`);
+if (merged.hopCount !== 3) throw new Error(`hops ${merged.hopCount}`);
 console.log("AVNU netting OK", merged);

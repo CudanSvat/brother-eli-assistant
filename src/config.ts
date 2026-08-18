@@ -41,6 +41,10 @@ export const QUOTE_TOKENS: Record<string, { symbol: string; decimals: number }> 
     symbol: "USDC",
     decimals: 6,
   },
+  "0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb": {
+    symbol: "USDC",
+    decimals: 6,
+  },
   "0x068f5c6a61780768455de69077e07e89787839bf8166decfbf92b645209c0fb8": {
     symbol: "USDT",
     decimals: 6,

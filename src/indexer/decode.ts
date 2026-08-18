@@ -51,12 +51,13 @@ function readPoolKey(reader: FeltReader): PoolKey {
 }
 
 /**
- * Ekubo Core `Swapped` layout (locker-centric delta):
+ * Ekubo Core `Swapped` layout:
  * locker, pool_key, params (i129, is_token1, u256, skip_ahead),
  * delta (i129, i129), sqrt_ratio_after u256, tick_after i129, liquidity_after u128
  *
- * Positive delta = Core owes the locker that token (user received it = buy).
- * Negative delta = locker owes Core (user spent that token = sell).
+ * Core reports locker-vs-pool deltas with the opposite sign of user flow:
+ * negative token delta = Core paid the locker = user received it (buy).
+ * We negate so the rest of the bot can treat positive = user received.
  */
 export function decodeSwapped(event: {
   keys?: readonly (string | number | bigint)[];
@@ -84,8 +85,8 @@ export function decodeSwapped(event: {
   }
   reader.next();
 
-  const delta0 = reader.i129();
-  const delta1 = reader.i129();
+  const delta0 = -reader.i129();
+  const delta1 = -reader.i129();
 
   return {
     locker,

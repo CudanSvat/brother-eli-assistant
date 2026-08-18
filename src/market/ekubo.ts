@@ -48,7 +48,7 @@ export async function getEkuboToken(address: string): Promise<{
       decimals: hit.decimals ?? 18,
     };
   } catch (error) {
-    console.warn("Ekubo token list failed:", error);
+    console.warn("Ekubo token list unavailable, using DexScreener/RPC");
     cache.set(token, null);
     return null;
   }

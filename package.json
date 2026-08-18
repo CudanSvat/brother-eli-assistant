@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "tsx scripts/test-netting.ts && tsx scripts/test-avnu-slay-buy.ts"
   },
   "engines": {
     "node": ">=20"

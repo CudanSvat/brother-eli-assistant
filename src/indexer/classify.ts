@@ -105,6 +105,6 @@ export function netTransaction(
     transactionHash: last.transactionHash,
     blockNumber: last.blockNumber,
     locker: last.locker,
-    hopCount: involving.length,
+    hopCount: hops.length,
   };
 }
