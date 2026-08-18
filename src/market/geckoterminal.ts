@@ -144,20 +144,22 @@ export async function getQuotePriceUsd(quoteAddress: string): Promise<number | n
   return dex?.priceUsd && dex.priceUsd > 0 ? dex.priceUsd : null;
 }
 
-async function tryOhlcv(network: string, pool: string): Promise<Candle[]> {
+async function tryOhlcv(network: string, pool: string, aggregate: number, limit: number): Promise<Candle[]> {
   const url =
     `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${pool}` +
-    `/ohlcv/minute?aggregate=5&limit=48&currency=usd`;
+    `/ohlcv/minute?aggregate=${aggregate}&limit=${limit}&currency=usd`;
   const body = await fetchJson<OhlcvResponse>(url);
   const list = body.data?.attributes?.ohlcv_list ?? [];
-  return list.map(([time, open, high, low, close, volume]) => ({
-    time,
-    open,
-    high,
-    low,
-    close,
-    volume,
-  }));
+  return list
+    .map(([time, open, high, low, close, volume]) => ({
+      time,
+      open,
+      high,
+      low,
+      close,
+      volume,
+    }))
+    .sort((a, b) => a.time - b.time);
 }
 
 export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
@@ -167,14 +169,19 @@ export async function getOhlcv(pairAddress: string | null | undefined): Promise<
   if (hit && Date.now() - hit.at < 15_000) return hit.candles;
 
   for (const network of [NETWORK, "starknet"]) {
-    try {
-      const candles = await tryOhlcv(network, pairAddress);
-      if (candles.length) {
-        ohlcvCache.set(key, { at: Date.now(), candles });
-        return candles;
+    for (const [aggregate, limit] of [
+      [15, 64],
+      [5, 72],
+    ] as const) {
+      try {
+        const candles = await tryOhlcv(network, pairAddress, aggregate, limit);
+        if (candles.length >= 8) {
+          ohlcvCache.set(key, { at: Date.now(), candles });
+          return candles;
+        }
+      } catch {
+        // try next timeframe / network
       }
-    } catch {
-      // try next network id
     }
   }
   ohlcvCache.set(key, { at: Date.now(), candles: [] });
