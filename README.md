@@ -39,11 +39,11 @@ copy .env.example .env
 
 ```
 TELEGRAM_BOT_TOKEN=123456:abc
-STARKNET_RPC_URL=https://rpc.starknet.lava.build
+STARKNET_RPC_URL=https://api.cartridge.gg/x/starknet/mainnet
 STARKNET_WS_URL=
 ```
 
-Use a dedicated RPC key in production. Public endpoints rate-limit.
+Cartridge (`https://api.cartridge.gg/x/starknet/mainnet`) is the production RPC.
 
 4. Install and run:
 
@@ -111,7 +111,7 @@ Repo: [github.com/CudanSvat/brother-eli-assistant](https://github.com/CudanSvat/
 The bot token lives in `.env` and is gitignored. Production on Railway uses:
 
 - `TELEGRAM_BOT_TOKEN` (set in the Railway dashboard / CLI, never committed)
-- `STARKNET_RPC_URL` (use a dedicated key, not the public Lava URL)
+- `STARKNET_RPC_URL` (Cartridge: `https://api.cartridge.gg/x/starknet/mainnet`)
 - `DATABASE_PATH=/data/brother-eli.db`
 - `NODE_VERSION=20`
 

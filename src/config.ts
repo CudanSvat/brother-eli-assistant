@@ -3,7 +3,7 @@ import { hash } from "starknet";
 
 export const config = {
   telegramToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
-  rpcUrl: process.env.STARKNET_RPC_URL?.trim() || "https://rpc.starknet.lava.build",
+  rpcUrl: process.env.STARKNET_RPC_URL?.trim() || "https://api.cartridge.gg/x/starknet/mainnet",
   wsUrl: process.env.STARKNET_WS_URL?.trim() || "",
   databasePath: process.env.DATABASE_PATH?.trim() || "data/brother-eli.db",
   maxTokensPerGroup: 10,
