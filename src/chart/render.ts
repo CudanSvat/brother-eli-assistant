@@ -1,24 +1,61 @@
-import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, type SKRSContext2D } from "@napi-rs/canvas";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { BOT_NAME } from "../config.ts";
 import type { Candle } from "../types.ts";
 
 const WIDTH = 1080;
-const HEIGHT = 560;
+const HEIGHT = 600;
+const MIN_TRADE_CANDLES = 8;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 const C = {
-  bg: "#0b0f14",
-  bgTop: "#121821",
-  grid: "#1d2633",
-  axis: "#8b95a8",
+  bg: "#070b12",
+  bgTop: "#121826",
+  pane: "#0c111b",
+  paneBorder: "#243044",
+  grid: "rgba(148, 163, 184, 0.09)",
+  axis: "#9aa6b8",
   title: "#f4f7fb",
-  muted: "#7d8799",
+  muted: "#8b96a8",
+  dim: "#667085",
   up: "#22c55e",
   down: "#ef4444",
   upFill: "#16a34a",
   downFill: "#dc2626",
-  volumeUp: "rgba(34, 197, 94, 0.35)",
-  volumeDown: "rgba(239, 68, 68, 0.35)",
-  priceLine: "rgba(244, 247, 251, 0.35)",
+  volumeUp: "rgba(34, 197, 94, 0.38)",
+  volumeDown: "rgba(239, 68, 68, 0.38)",
+  priceLine: "rgba(244, 247, 251, 0.42)",
+  tagText: "#ffffff",
 };
+
+export interface ChartRenderOptions {
+  quote?: string;
+  intervalLabel?: string;
+}
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+function registerInterFonts(): void {
+  if (GlobalFonts.has("Inter")) return;
+  const dirs = [path.join(here, "../../assets/fonts"), path.join(process.cwd(), "assets/fonts")];
+  for (const dir of dirs) {
+    const regular = path.join(dir, "Inter-Regular.ttf");
+    const bold = path.join(dir, "Inter-Bold.ttf");
+    if (!existsSync(regular) || !existsSync(bold)) continue;
+    GlobalFonts.registerFromPath(regular, "Inter");
+    GlobalFonts.registerFromPath(bold, "Inter");
+    if (GlobalFonts.has("Inter")) return;
+  }
+  console.warn("Inter font registration failed; chart labels may be missing on this host");
+}
+
+registerInterFonts();
+
+function font(size: number, weight = 400): string {
+  return `${weight} ${size}px Inter`;
+}
 
 function finite(n: number): boolean {
   return Number.isFinite(n) && n > 0;
@@ -36,18 +73,57 @@ function formatPrice(value: number): string {
   if (value >= 1) return value.toFixed(4);
   if (value >= 0.01) return value.toFixed(5);
   if (value >= 0.0001) return value.toFixed(6);
+  if (value >= 0.000001) return value.toFixed(8);
   return value.toPrecision(3);
 }
 
-function formatTime(unix: number): string {
-  const ms = unix < 1e12 ? unix * 1000 : unix;
-  const d = new Date(ms);
-  const h = String(d.getUTCHours()).padStart(2, "0");
-  const m = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${h}:${m}`;
+function formatPct(change: number): string {
+  const sign = change >= 0 ? "+" : "";
+  const abs = Math.abs(change);
+  const digits = abs >= 10 ? 1 : abs >= 1 ? 2 : 2;
+  return `${sign}${change.toFixed(digits)}%`;
 }
 
-function cleanCandles(raw: Candle[]): Candle[] {
+function formatVolume(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  if (value >= 10) return `$${value.toFixed(0)}`;
+  return `$${value.toFixed(2)}`;
+}
+
+function candleMs(unix: number): number {
+  return unix < 1e12 ? unix * 1000 : unix;
+}
+
+function formatDateTime(unix: number): string {
+  const d = new Date(candleMs(unix));
+  const day = d.getUTCDate();
+  const mon = MONTHS[d.getUTCMonth()]!;
+  const h = String(d.getUTCHours()).padStart(2, "0");
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${day} ${mon} ${h}:${m}`;
+}
+
+function roundRect(
+  ctx: SKRSContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  const radius = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
+function validCandles(raw: Candle[]): Candle[] {
   const sorted = [...raw]
     .filter(
       (c) =>
@@ -62,18 +138,64 @@ function cleanCandles(raw: Candle[]): Candle[] {
   const unique: Candle[] = [];
   for (const candle of sorted) {
     const prev = unique[unique.length - 1];
-    if (prev && prev.time === candle.time) {
-      unique[unique.length - 1] = candle;
-    } else {
-      unique.push(candle);
-    }
+    if (prev && prev.time === candle.time) unique[unique.length - 1] = candle;
+    else unique.push(candle);
   }
+  return unique;
+}
 
-  const closes = unique.map((c) => c.close).sort((a, b) => a - b);
+function hasRealRange(candle: Candle): boolean {
+  const prices = [candle.open, candle.high, candle.low, candle.close];
+  const lo = Math.min(...prices);
+  const hi = Math.max(...prices);
+  const scale = Math.max(Math.abs(hi), Math.abs(lo), 1e-18);
+  return (hi - lo) / scale > 1e-7;
+}
+
+/** Empty Gecko buckets: zero/missing volume and a carried-forward flat OHLC. */
+function isEmptyCandle(candle: Candle): boolean {
+  const volume = Number.isFinite(candle.volume) ? candle.volume : 0;
+  return volume <= 0 && !hasRealRange(candle);
+}
+
+function intervalStats(candles: Candle[]): { nativeMs: number; medianMs: number } {
+  const fallback = 15 * 60 * 1000;
+  if (candles.length < 2) return { nativeMs: fallback, medianMs: fallback };
+  const dts: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const dt = candleMs(candles[i]!.time) - candleMs(candles[i - 1]!.time);
+    if (dt > 0) dts.push(dt);
+  }
+  if (!dts.length) return { nativeMs: fallback, medianMs: fallback };
+  dts.sort((a, b) => a - b);
+  return { nativeMs: dts[0]!, medianMs: dts[Math.floor(dts.length / 2)]! };
+}
+
+function intervalLabelFromMs(ms: number): string {
+  if (ms <= 90 * 1000) return "1m";
+  if (ms <= 6 * 60 * 1000) return "5m";
+  if (ms <= 20 * 60 * 1000) return "15m";
+  if (ms <= 90 * 60 * 1000) return "1h";
+  return "1h";
+}
+
+function windowLabel(first: Candle, last: Candle): string {
+  const spanMs = Math.max(0, candleMs(last.time) - candleMs(first.time));
+  const hours = spanMs / 3_600_000;
+  if (hours >= 40) return `last ${Math.max(2, Math.round(hours / 24))}d of trades`;
+  if (hours >= 20) return `last ${Math.round(hours)}h of trades`;
+  if (hours >= 1.5) return `last ${Math.round(hours)}h of trades`;
+  const mins = Math.max(1, Math.round(spanMs / 60_000));
+  return `last ${mins}m of trades`;
+}
+
+function clipOutliers(raw: Candle[]): Candle[] {
+  const candles = raw.map((c) => ({ ...c }));
+  const closes = candles.map((c) => c.close).sort((a, b) => a - b);
   const typical = percentile(closes, 50) || closes[0] || 0;
-  if (!typical) return unique;
+  if (!typical) return candles;
 
-  return unique.filter((c) => {
+  return candles.filter((c) => {
     const mid = (c.open + c.close) / 2;
     if (mid > typical * 25 || mid < typical / 25) return false;
     if (c.high > mid * 8 || c.low < mid / 8) {
@@ -84,6 +206,25 @@ function cleanCandles(raw: Candle[]): Candle[] {
   });
 }
 
+function selectPlotCandles(raw: Candle[]): {
+  candles: Candle[];
+  skippedEmpty: boolean;
+  intervalMs: number;
+} {
+  const valid = validCandles(raw);
+  const { nativeMs } = intervalStats(valid);
+  const traded = valid.filter((c) => !isEmptyCandle(c));
+  const useFiltered = traded.length >= MIN_TRADE_CANDLES;
+  const candles = clipOutliers(useFiltered ? traded : valid);
+  const first = candles[0];
+  const last = candles[candles.length - 1];
+  const spanMs = first && last ? candleMs(last.time) - candleMs(first.time) : 0;
+  const expectedBuckets = nativeMs > 0 ? spanMs / nativeMs + 1 : candles.length;
+  const skippedEmpty =
+    (useFiltered && traded.length < valid.length) || expectedBuckets > candles.length * 1.35;
+  return { candles, skippedEmpty, intervalMs: nativeMs };
+}
+
 function priceWindow(candles: Candle[]): { min: number; max: number } {
   const samples = candles.flatMap((c) => [c.open, c.close, c.high, c.low]).sort((a, b) => a - b);
   let min = percentile(samples, 4);
@@ -92,7 +233,7 @@ function priceWindow(candles: Candle[]): { min: number; max: number } {
     min = Math.min(...samples);
     max = Math.max(...samples);
   }
-  const pad = (max - min) * 0.12 || max * 0.04;
+  const pad = (max - min) * 0.14 || max * 0.04;
   return { min: Math.max(0, min - pad), max: max + pad };
 }
 
@@ -105,29 +246,21 @@ function niceTicks(min: number, max: number, count: number): number[] {
   const start = Math.ceil(min / step) * step;
   const ticks: number[] = [];
   for (let v = start; v <= max + step / 1000; v += step) ticks.push(v);
+  if (ticks.length < 3) {
+    ticks.length = 0;
+    for (let i = 0; i <= count; i++) ticks.push(min + (span * i) / count);
+  }
   return ticks;
 }
 
-function roundRect(
-  ctx: SKRSContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): void {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
-}
-
-export function renderChartPng(symbol: string, raw: Candle[]): Buffer | null {
-  const candles = cleanCandles(raw);
+export function renderChartPng(
+  symbol: string,
+  raw: Candle[],
+  options: ChartRenderOptions = {},
+): Buffer | null {
+  registerInterFonts();
+  const quote = options.quote?.trim() || "USD";
+  const { candles, skippedEmpty, intervalMs } = selectPlotCandles(raw);
   if (candles.length < 3) return null;
 
   const canvas = createCanvas(WIDTH, HEIGHT);
@@ -139,31 +272,40 @@ export function renderChartPng(symbol: string, raw: Candle[]): Buffer | null {
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  const pad = { top: 64, right: 88, bottom: 36, left: 20 };
-  const volH = 78;
-  const gap = 10;
+  const pad = { top: 78, right: 108, bottom: 44, left: 18 };
+  const volH = 86;
+  const gap = 12;
   const plotX = pad.left;
   const plotY = pad.top;
   const plotW = WIDTH - pad.left - pad.right;
   const plotH = HEIGHT - pad.top - pad.bottom - volH - gap;
   const volY = plotY + plotH + gap;
 
+  ctx.fillStyle = C.pane;
+  roundRect(ctx, plotX, plotY, plotW, plotH, 6);
+  ctx.fill();
+  roundRect(ctx, plotX, volY, plotW, volH, 6);
+  ctx.fill();
+
   const { min, max } = priceWindow(candles);
   const span = max - min || 1;
-  const maxVol = Math.max(...candles.map((c) => c.volume || 0), 1);
-  const slot = plotW / candles.length;
-  const bodyW = Math.max(3, Math.min(14, slot * 0.62));
+  const volumes = candles.map((c) => c.volume || 0).sort((a, b) => a - b);
+  const trueMaxVol = volumes[volumes.length - 1] ?? 0;
+  const volScale = Math.max(percentile(volumes, 90) || trueMaxVol, trueMaxVol * 0.15, 1);
+  const inner = 8;
+  const slot = (plotW - inner * 2) / candles.length;
+  const bodyW = Math.max(4, Math.min(18, slot * 0.72));
 
   const yFor = (price: number) => {
     const clipped = Math.min(max, Math.max(min, price));
     return plotY + ((max - clipped) / span) * plotH;
   };
-  const xFor = (i: number) => plotX + (i + 0.5) * slot;
+  const xFor = (i: number) => plotX + inner + (i + 0.5) * slot;
 
+  const ticks = niceTicks(min, max, 5);
   ctx.strokeStyle = C.grid;
   ctx.lineWidth = 1;
-  const ticks = niceTicks(min, max, 5);
-  ctx.font = "12px sans-serif";
+  ctx.font = font(11);
   ctx.fillStyle = C.axis;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
@@ -173,30 +315,57 @@ export function renderChartPng(symbol: string, raw: Candle[]): Buffer | null {
     ctx.moveTo(plotX, y);
     ctx.lineTo(plotX + plotW, y);
     ctx.stroke();
-    ctx.fillText(formatPrice(tick), plotX + plotW + 8, y);
+    ctx.fillText(formatPrice(tick), plotX + plotW + 10, y);
   }
 
-  ctx.strokeStyle = "#2a3444";
+  ctx.strokeStyle = C.paneBorder;
   ctx.strokeRect(plotX + 0.5, plotY + 0.5, plotW - 1, plotH - 1);
+  ctx.strokeRect(plotX + 0.5, volY + 0.5, plotW - 1, volH - 1);
 
   const last = candles[candles.length - 1]!;
   const first = candles[0]!;
-  ctx.setLineDash([5, 5]);
+  const lastUp = last.close >= last.open;
+  const lastY = yFor(last.close);
+
+  ctx.setLineDash([6, 5]);
   ctx.strokeStyle = C.priceLine;
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(plotX, yFor(last.close));
-  ctx.lineTo(plotX + plotW, yFor(last.close));
+  ctx.moveTo(plotX, lastY);
+  ctx.lineTo(plotX + plotW, lastY);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  candles.forEach((candle, i) => {
-    const x = xFor(i);
-    const up = candle.close >= candle.open;
-    const vol = candle.volume || 0;
-    const vh = Math.max(2, (vol / maxVol) * (volH - 4));
-    ctx.fillStyle = up ? C.volumeUp : C.volumeDown;
-    ctx.fillRect(x - bodyW / 2, volY + volH - vh, bodyW, vh);
-  });
+  if (trueMaxVol > 0) {
+    candles.forEach((candle, i) => {
+      const vol = candle.volume || 0;
+      if (vol <= 0) return;
+      const x = xFor(i);
+      const up = candle.close >= candle.open;
+      const vh = Math.max(2, Math.min(volH - 18, (vol / volScale) * (volH - 18)));
+      ctx.fillStyle = up ? C.volumeUp : C.volumeDown;
+      ctx.fillRect(x - bodyW / 2, volY + volH - 6 - vh, bodyW, vh);
+    });
+  }
+
+  for (let i = 1; i < candles.length; i++) {
+    const prev = candles[i - 1]!;
+    const next = candles[i]!;
+    const gapMs = candleMs(next.time) - candleMs(prev.time);
+    if (gapMs <= intervalMs * 1.6) continue;
+    const x0 = xFor(i - 1) + bodyW / 2 + 1;
+    const x1 = xFor(i) - bodyW / 2 - 1;
+    if (x1 - x0 < 8) continue;
+    const up = prev.close >= prev.open;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = up ? "rgba(34, 197, 94, 0.55)" : "rgba(239, 68, 68, 0.55)";
+    ctx.lineWidth = 1.15;
+    ctx.beginPath();
+    ctx.moveTo(x0, yFor(prev.close));
+    ctx.lineTo(x1, yFor(next.open));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   candles.forEach((candle, i) => {
     const x = xFor(i);
@@ -204,7 +373,7 @@ export function renderChartPng(symbol: string, raw: Candle[]): Buffer | null {
     const color = up ? C.up : C.down;
     ctx.strokeStyle = color;
     ctx.fillStyle = up ? C.upFill : C.downFill;
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = 1.25;
     ctx.beginPath();
     ctx.moveTo(x, yFor(candle.high));
     ctx.lineTo(x, yFor(candle.low));
@@ -212,49 +381,94 @@ export function renderChartPng(symbol: string, raw: Candle[]): Buffer | null {
     const top = yFor(Math.max(candle.open, candle.close));
     const bot = yFor(Math.min(candle.open, candle.close));
     const h = Math.max(2, bot - top);
-    roundRect(ctx, x - bodyW / 2, top, bodyW, h, 1);
-    ctx.fill();
+    ctx.fillRect(x - bodyW / 2, top, bodyW, h);
+    ctx.strokeRect(x - bodyW / 2 + 0.5, top + 0.5, Math.max(1, bodyW - 1), Math.max(1, h - 1));
   });
 
-  const rawDt = candles.length > 1 ? candles[1]!.time - candles[0]!.time : 900;
-  const dtSec = rawDt > 10_000 ? rawDt / 1000 : rawDt;
-  const tf = dtSec >= 3000 ? "1h" : dtSec >= 700 ? "15m" : "5m";
-  const change = ((last.close - first.open) / first.open) * 100;
+  const tagText = formatPrice(last.close);
+  ctx.font = font(12, 700);
+  const tagW = Math.max(72, ctx.measureText(tagText).width + 16);
+  const tagH = 22;
+  const tagX = plotX + plotW + 1;
+  const tagY = Math.min(plotY + plotH - tagH - 2, Math.max(plotY + 2, lastY - tagH / 2));
+  ctx.fillStyle = lastUp ? C.up : C.down;
+  roundRect(ctx, tagX, tagY, tagW, tagH, 4);
+  ctx.fill();
+  ctx.fillStyle = C.tagText;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(tagText, tagX + tagW / 2, tagY + tagH / 2 + 0.5);
+
+  ctx.fillStyle = C.muted;
+  ctx.font = font(11, 700);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("Vol", plotX + 8, volY + 16);
+  const volLabel = formatVolume(trueMaxVol);
+  if (volLabel) {
+    ctx.font = font(11);
+    ctx.fillStyle = C.dim;
+    ctx.fillText(volLabel, plotX + 36, volY + 16);
+  }
+
+  const change = first.open > 0 ? ((last.close - first.open) / first.open) * 100 : 0;
   const up = change >= 0;
+  const visibleHigh = Math.max(...candles.map((c) => c.high));
+  const visibleLow = Math.min(...candles.map((c) => c.low));
+  const tf = options.intervalLabel?.trim() || intervalLabelFromMs(intervalMs);
+  const subtitleParts = [`${tf} · ${windowLabel(first, last)}`];
+  if (skippedEmpty) subtitleParts.push("empty periods skipped");
+
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = C.title;
-  ctx.font = "700 24px sans-serif";
-  ctx.fillText(`${symbol} / USD · ${tf}`, pad.left, 32);
-  ctx.font = "500 13px sans-serif";
-  ctx.fillStyle = C.muted;
-  ctx.fillText("GeckoTerminal", pad.left, 48);
+  ctx.font = font(24, 700);
+  ctx.fillText(`${symbol} / ${quote}`, pad.left, 32);
 
-  const pill = `${formatPrice(last.close)}  ${up ? "+" : ""}${change.toFixed(1)}%`;
-  ctx.font = "700 18px sans-serif";
-  const pillW = ctx.measureText(pill).width + 24;
+  ctx.font = font(13);
+  ctx.fillStyle = C.muted;
+  ctx.fillText(subtitleParts.join(" · "), pad.left, 52);
+
+  ctx.font = font(12, 700);
+  ctx.fillStyle = C.up;
+  ctx.fillText(`H ${formatPrice(visibleHigh)}`, pad.left, 70);
+  const highW = ctx.measureText(`H ${formatPrice(visibleHigh)}`).width;
+  ctx.fillStyle = C.down;
+  ctx.fillText(`L ${formatPrice(visibleLow)}`, pad.left + highW + 16, 70);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = up ? C.up : C.down;
+  ctx.font = font(26, 700);
+  ctx.fillText(formatPrice(last.close), WIDTH - 18, 34);
+  const pct = formatPct(change);
+  ctx.font = font(14, 700);
+  const pctW = ctx.measureText(pct).width + 16;
   ctx.fillStyle = up ? "rgba(34, 197, 94, 0.16)" : "rgba(239, 68, 68, 0.16)";
-  roundRect(ctx, WIDTH - pad.right - pillW, 12, pillW, 28, 8);
+  roundRect(ctx, WIDTH - 18 - pctW, 42, pctW, 22, 6);
   ctx.fill();
   ctx.fillStyle = up ? C.up : C.down;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(pill, WIDTH - pad.right - pillW / 2, 26);
-
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = C.axis;
-  ctx.font = "12px sans-serif";
-  const labelEvery = Math.max(1, Math.ceil(candles.length / 6));
-  candles.forEach((candle, i) => {
-    if (i % labelEvery !== 0 && i !== candles.length - 1) return;
-    ctx.fillText(formatTime(candle.time), xFor(i), HEIGHT - 12);
-  });
+  ctx.fillText(pct, WIDTH - 18 - pctW / 2, 53);
 
   ctx.textAlign = "left";
-  ctx.fillStyle = C.muted;
-  ctx.font = "11px sans-serif";
-  ctx.fillText(`${BOT_NAME}  ·  times UTC`, pad.left, volY - 2);
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = C.axis;
+  ctx.font = font(12);
+  const startLabel = formatDateTime(first.time);
+  const endLabel = formatDateTime(last.time);
+  ctx.fillText(startLabel, plotX, HEIGHT - 14);
+  ctx.textAlign = "right";
+  ctx.fillText(`${endLabel}  UTC`, plotX + plotW, HEIGHT - 14);
+  ctx.textAlign = "center";
+  ctx.fillStyle = C.dim;
+  ctx.font = font(11);
+  ctx.fillText("→", plotX + plotW / 2, HEIGHT - 14);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = C.dim;
+  ctx.font = font(10);
+  ctx.fillText(BOT_NAME, pad.left, volY - 3);
 
   return canvas.toBuffer("image/png");
 }

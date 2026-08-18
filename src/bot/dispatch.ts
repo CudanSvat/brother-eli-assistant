@@ -39,7 +39,9 @@ export function attachDispatcher(bot: Bot) {
     if (needsChart) {
       try {
         const candles = await getOhlcv(market?.pairAddress ?? tokens[0]?.pairAddress);
-        chartPng = renderChartPng(tokens[0]!.symbol, candles);
+        chartPng = renderChartPng(tokens[0]!.symbol, candles, {
+          quote: market?.quoteSymbol ?? "USD",
+        });
       } catch (error) {
         console.warn("Chart render failed:", error);
       }
