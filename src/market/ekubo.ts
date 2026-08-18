@@ -1,4 +1,4 @@
-import { fetchJson, normalizeAddress } from "../lib/format.ts";
+import { compactAddress, fetchJson, normalizeAddress } from "../lib/format.ts";
 
 interface EkuboToken {
   name?: string;
@@ -54,12 +54,18 @@ export async function getEkuboToken(address: string): Promise<{
   }
 }
 
+const ETH = "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7";
+
 export function ekuboSwapUrl(tokenAddress: string): string {
-  return `https://app.ekubo.org/?outputCurrency=${normalizeAddress(tokenAddress)}`;
+  const token = compactAddress(tokenAddress);
+  const eth = compactAddress(ETH);
+  return `https://ekubo.org/swap?outputCurrency=${token}&amount=1&inputCurrency=${eth}`;
 }
 
-export function avnuSwapUrl(tokenAddress: string): string {
-  return `https://app.avnu.fi/en?tokenTo=${normalizeAddress(tokenAddress)}`;
+export function avnuSwapUrl(tokenAddress: string, symbol?: string): string {
+  const token = normalizeAddress(tokenAddress);
+  const buy = (symbol || "token").toLowerCase().replace(/[^a-z0-9]/g, "") || "token";
+  return `https://app.avnu.fi/en?tokenTo=${token}&sellToken=eth&buyToken=${buy}`;
 }
 
 export function starkscanTxUrl(hash: string): string {

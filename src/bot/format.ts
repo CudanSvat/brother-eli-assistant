@@ -7,10 +7,9 @@ import {
   formatUsd,
   normalizeAddress,
   quoteMeta,
-  shortAddress,
   toUnitAmount,
 } from "../lib/format.ts";
-import { avnuSwapUrl, ekuboSwapUrl, starkscanAddressUrl, starkscanTxUrl } from "../market/ekubo.ts";
+import { avnuSwapUrl, ekuboSwapUrl, starkscanTxUrl } from "../market/ekubo.ts";
 import { geckoTokenUrl } from "../market/geckoterminal.ts";
 import { dexScreenerTokenUrl } from "../market/dexscreener.ts";
 import type { ClassifiedSwap, MarketSnapshot, TokenSettings } from "../types.ts";
@@ -23,16 +22,14 @@ export interface AlertPayload {
   tokenUnits: number;
   quoteUnits: number;
   quoteSymbol: string;
-  wallet: string;
-  whale: boolean;
 }
 
 export function buildAlert(input: AlertPayload): {
   caption: string;
-  keyboard: InlineKeyboard;
   gifUrl: string | null;
+  links: AlertLinks;
 } {
-  const { token, swap, market, usdValue, tokenUnits, wallet, whale } = input;
+  const { token, swap, market, usdValue, tokenUnits } = input;
   const emoji = token.emoji;
   const step = Math.max(1, token.emojiStepUsd);
   const count = Math.min(50, Math.max(1, Math.round(usdValue / step)));
@@ -52,7 +49,7 @@ export function buildAlert(input: AlertPayload): {
 
   const lines = [
     ladder,
-    `<b>${title}</b>${whale ? "  🐋" : ""}`,
+    `<b>${title}</b>`,
     "",
     spentUsd,
     ...paidLines,
@@ -60,18 +57,38 @@ export function buildAlert(input: AlertPayload): {
     swap.hopCount > 1 ? `Route: 1 buy across ${swap.hopCount} pools` : "",
     `Price: ${formatUsd(market?.priceUsd)}${change ? `  (${change} 1h)` : ""}`,
     `MC ${formatUsd(market?.marketCap)} · Liq ${formatUsd(market?.liquidityUsd)} · Vol ${formatUsd(market?.volume24h)}`,
-    `Wallet: <a href="${starkscanAddressUrl(wallet)}">${shortAddress(wallet)}</a>`,
   ].filter((line) => line !== "");
 
-  const keyboard = new InlineKeyboard()
-    .url("TX", starkscanTxUrl(swap.transactionHash))
-    .url("Chart", market?.pairUrl || geckoTokenUrl(token.address) || dexScreenerTokenUrl(token.address))
-    .url("Ekubo", ekuboSwapUrl(token.address))
-    .url("Buy", avnuSwapUrl(token.address));
+  const links: AlertLinks = {
+    tx: starkscanTxUrl(swap.transactionHash),
+    gecko: market?.pairUrl || geckoTokenUrl(token.address) || dexScreenerTokenUrl(token.address),
+    ekubo: ekuboSwapUrl(token.address),
+    avnu: avnuSwapUrl(token.address, token.symbol),
+  };
 
-  const gifUrl = whale && token.whaleGifUrl ? token.whaleGifUrl : token.gifUrl;
+  return { caption: lines.join("\n"), gifUrl: token.gifUrl, links };
+}
 
-  return { caption: lines.join("\n"), keyboard, gifUrl };
+export interface AlertLinks {
+  tx: string;
+  gecko: string;
+  ekubo: string;
+  avnu: string;
+}
+
+export function alertKeyboard(
+  links: AlertLinks,
+  toggle?: { id: string; show: "chart" | "gif" },
+): InlineKeyboard {
+  const kb = new InlineKeyboard()
+    .url("TX", links.tx)
+    .url("Gecko", links.gecko)
+    .url("Ekubo", links.ekubo)
+    .url("AVNU", links.avnu);
+  if (toggle) {
+    kb.row().text(toggle.show === "chart" ? "Chart" : "GIF", `s:${toggle.id}:${toggle.show === "chart" ? "c" : "g"}`);
+  }
+  return kb;
 }
 
 export function adminHomeText(count: number): string {
@@ -92,8 +109,7 @@ export function tokenCardText(token: TokenSettings): string {
     "",
     `Min buy: <b>${formatUsd(token.minUsd)}</b>`,
     `Emoji: ${token.emoji}  ·  one extra every ${formatUsd(token.emojiStepUsd)}`,
-    `GIF: ${token.gifUrl ? "set" : "none"}   ·  Whale GIF: ${token.whaleGifUrl ? "set" : "none"}`,
-    `Whale: buys from <b>${formatUsd(token.whaleUsd)}</b>`,
+    `GIF: ${token.gifUrl ? "set" : "none"}`,
     `Chart: ${token.chartEnabled ? "on" : "off"}`,
     `Price ping: ${token.priceAlertPct != null ? `when price moves ±${token.priceAlertPct}%` : "off"}`,
   ].join("\n");
@@ -118,9 +134,6 @@ export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
     .text(`Step ${formatUsd(token.emojiStepUsd)}`, `t:step:${token.id}`)
     .row()
     .text(token.gifUrl ? "Change GIF" : "Set GIF", `t:gif:${token.id}`)
-    .text(token.whaleGifUrl ? "Change whale GIF" : "Whale GIF", `t:wgif:${token.id}`)
-    .row()
-    .text(`Whale ${formatUsd(token.whaleUsd)}`, `t:whale:${token.id}`)
     .text(token.chartEnabled ? "Chart: on" : "Chart: off", `t:chart:${token.id}`)
     .row()
     .text(

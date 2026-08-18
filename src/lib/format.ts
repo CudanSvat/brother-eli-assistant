@@ -28,6 +28,12 @@ export function shortAddress(address: string): string {
   return `${n.slice(0, 6)}…${n.slice(-4)}`;
 }
 
+/** Unpadded 0x… form used by ekubo.org swap links. */
+export function compactAddress(address: string): string {
+  const hex = normalizeAddress(address).slice(2).replace(/^0+/, "") || "0";
+  return `0x${hex}`;
+}
+
 export function feltToBigInt(value: string | bigint | number): bigint {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") return BigInt(value);

@@ -1,5 +1,4 @@
 import type { Bot } from "grammy";
-import type { RpcProvider } from "starknet";
 import { tokensByAddress, updateToken } from "../store/db.ts";
 import { getMarketSnapshot, getOhlcv, getQuotePriceUsd } from "../market/geckoterminal.ts";
 import { renderChartPng } from "../chart/render.ts";
@@ -8,19 +7,7 @@ import { formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
 import { enqueueAlert } from "./queue.ts";
 import type { ClassifiedSwap } from "../types.ts";
 
-async function senderOf(provider: RpcProvider, txHash: string): Promise<string> {
-  try {
-    const tx = await provider.getTransactionByHash(txHash);
-    const sender =
-      (tx as { sender_address?: string }).sender_address ??
-      (tx as { senderAddress?: string }).senderAddress;
-    return sender || "0x0";
-  } catch {
-    return "0x0";
-  }
-}
-
-export function attachDispatcher(bot: Bot, provider: RpcProvider) {
+export function attachDispatcher(bot: Bot) {
   const posted = new Set<string>();
 
   return async function onSwap(swap: ClassifiedSwap): Promise<void> {
@@ -46,10 +33,9 @@ export function attachDispatcher(bot: Bot, provider: RpcProvider) {
     legs.forEach((leg, i) => {
       quotePrices.set(normalizeAddress(leg.address), legPrices[i] ?? null);
     });
-    const wallet = await senderOf(provider, swap.transactionHash);
 
     let chartPng: Buffer | null = null;
-    const needsChart = tokens.some((token) => token.chartEnabled && !token.gifUrl);
+    const needsChart = tokens.some((token) => token.chartEnabled);
     if (needsChart) {
       try {
         const candles = await getOhlcv(market?.pairAddress ?? tokens[0]?.pairAddress);
@@ -78,22 +64,19 @@ export function attachDispatcher(bot: Bot, provider: RpcProvider) {
       posted.add(postKey);
       if (posted.size > 8_000) posted.clear();
 
-      const whale = values.usdValue >= token.whaleUsd;
       const card = buildAlert({
         token,
         swap,
         market,
         ...values,
-        wallet,
-        whale,
       });
 
       enqueueAlert(bot.api, {
         chatId: token.chatId,
         caption: card.caption,
-        keyboard: card.keyboard,
+        links: card.links,
         gifUrl: card.gifUrl,
-        chartPng: token.chartEnabled && !card.gifUrl ? chartPng : null,
+        chartPng: token.chartEnabled ? chartPng : null,
       });
 
       if (market?.priceUsd && token.priceAlertPct != null && token.lastPriceUsd) {
@@ -103,7 +86,7 @@ export function attachDispatcher(bot: Bot, provider: RpcProvider) {
           enqueueAlert(bot.api, {
             chatId: token.chatId,
             caption: `<b>${token.symbol} price ${dir} ${move.toFixed(1)}%</b>\nNow ${formatUsd(market.priceUsd)}`,
-            keyboard: card.keyboard,
+            links: card.links,
             gifUrl: null,
             chartPng: token.chartEnabled ? chartPng : null,
           });

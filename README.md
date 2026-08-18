@@ -2,13 +2,13 @@
 
 Your **Starknet helper** in Telegram. Buy alerts are live now (price, charts, GIFs); more tools are coming.
 
-It watches Ekubo Core swaps (including AVNU and Fibrous routes) and posts cards in your token group: emoji ladder, USD spent, optional STRK spent, market cap, mini chart, custom GIFs, and whale GIFs.
+It watches Ekubo Core swaps (including AVNU and Fibrous routes) and posts cards in your token group: emoji ladder, USD spent, market cap, an in-chat candlestick chart, and optional GIFs. If both GIF and chart are set, tap **Chart** / **GIF** on the card to switch.
 
 ## What it posts
 
 ```
 🟢🟢🟢🟢🟢
-SLAY Buy!  🐋
+SLAY Buy!
 
 Spent: $1,180
 STRK: 1,250
@@ -16,10 +16,9 @@ Got: 2,450,000 SLAY
 Route: 1 buy across 3 pools
 Price: $0.000482  (+8.2% 1h)
 MC $482K · Liq $91K · Vol $44K
-Wallet: 0x04ab…c91
 ```
 
-Buttons: Starkscan TX · DexScreener chart · Ekubo · Buy on AVNU
+Buttons: TX · Gecko · Ekubo · AVNU. With a GIF set, also **Chart** / **GIF** to slide the media.
 
 ## AVNU split routes
 
@@ -74,9 +73,8 @@ You want it to say privacy is **disabled**. Then add the bot to the group.
 | --- | --- | --- |
 | Min USD | $100 | Swaps below this are ignored |
 | Emoji + step | 🟢 / $50 | Ladder length = USD / step |
-| GIF | none | Send a GIF in chat, or a URL |
-| Whale GIF | none | Used on buys at or above the whale USD size |
-| Chart | on | 5m candlesticks when no GIF is set |
+| GIF | none | Send a GIF in chat, or a URL. With chart on, tap Chart / GIF on the card |
+| Chart | on | 5m candlesticks on the buy card (Gecko button still opens the pool) |
 | Price alert | off | Extra ping on ±N% moves |
 
 Cap: **10 tokens per group**.
