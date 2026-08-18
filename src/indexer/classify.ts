@@ -36,12 +36,14 @@ export function classifyHop(
   if (tokenDelta === 0n) return null;
 
   const side = tokenDelta > 0n ? "buy" : "sell";
+  const quoteAmount = abs(quoteDelta);
   return {
     side,
     tokenAddress: trackedAddress,
     tokenAmount: abs(tokenDelta),
     quoteAddress,
-    quoteAmount: abs(quoteDelta),
+    quoteAmount,
+    paidLegs: [{ address: quoteAddress, amount: quoteAmount }],
     transactionHash: swap.transactionHash,
     blockNumber: swap.blockNumber,
     locker: swap.locker,
@@ -78,6 +80,7 @@ export function netTransaction(
   const side = tokenNet > 0n ? "buy" : "sell";
   const tokenAmount = abs(tokenNet);
 
+  const paidLegs: { address: string; amount: bigint }[] = [];
   let quoteAddress = involving[0]!.poolKey.token0;
   let quoteAmount = 0n;
   let bestScore = -1n;
@@ -87,6 +90,7 @@ export function netTransaction(
     const paid = side === "buy" ? amount < 0n : amount > 0n;
     if (!paid) continue;
     const size = abs(amount);
+    paidLegs.push({ address, amount: size });
     const score = (isQuoteToken(address) ? 1n << 128n : 0n) + size;
     if (score > bestScore) {
       bestScore = score;
@@ -102,6 +106,7 @@ export function netTransaction(
     tokenAmount,
     quoteAddress,
     quoteAmount,
+    paidLegs,
     transactionHash: last.transactionHash,
     blockNumber: last.blockNumber,
     locker: last.locker,

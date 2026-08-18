@@ -5,6 +5,7 @@ import {
   formatPct,
   formatTokenAmount,
   formatUsd,
+  normalizeAddress,
   quoteMeta,
   shortAddress,
   toUnitAmount,
@@ -31,7 +32,7 @@ export function buildAlert(input: AlertPayload): {
   keyboard: InlineKeyboard;
   gifUrl: string | null;
 } {
-  const { token, swap, market, usdValue, tokenUnits, quoteUnits, quoteSymbol, wallet, whale } = input;
+  const { token, swap, market, usdValue, tokenUnits, wallet, whale } = input;
   const emoji = token.emoji;
   const step = Math.max(1, token.emojiStepUsd);
   const count = Math.min(50, Math.max(1, Math.round(usdValue / step)));
@@ -40,17 +41,21 @@ export function buildAlert(input: AlertPayload): {
   const title = `${escapeHtml(token.symbol)} Buy!`;
 
   const spentUsd = `Spent: ${formatUsd(usdValue)}`;
-  const strkLine =
-    quoteSymbol === "STRK" && quoteUnits > 0
-      ? `STRK: ${formatTokenAmount(quoteUnits)}`
-      : "";
+  const paidLines = (swap.paidLegs.length ? swap.paidLegs : [{ address: swap.quoteAddress, amount: swap.quoteAmount }])
+    .map((leg) => {
+      const meta = quoteMeta(leg.address);
+      const units = toUnitAmount(leg.amount, meta.decimals);
+      if (units <= 0) return "";
+      return `${escapeHtml(meta.symbol)}: ${formatTokenAmount(units)}`;
+    })
+    .filter(Boolean);
 
   const lines = [
     ladder,
     `<b>${title}</b>${whale ? "  🐋" : ""}`,
     "",
     spentUsd,
-    strkLine,
+    ...paidLines,
     `Got: ${formatTokenAmount(tokenUnits)} ${escapeHtml(token.symbol)}`,
     swap.hopCount > 1 ? `Route: 1 buy across ${swap.hopCount} pools` : "",
     `Price: ${formatUsd(market?.priceUsd)}${change ? `  (${change} 1h)` : ""}`,
@@ -136,17 +141,27 @@ export function valueFromSwap(
   swap: ClassifiedSwap,
   token: TokenSettings,
   market: MarketSnapshot | null,
-  quotePriceUsd: number | null = null,
+  quotePrices: Map<string, number | null>,
 ): { usdValue: number; tokenUnits: number; quoteUnits: number; quoteSymbol: string } {
   const tokenUnits = toUnitAmount(swap.tokenAmount, token.decimals);
   const quote = quoteMeta(swap.quoteAddress);
   const quoteUnits = toUnitAmount(swap.quoteAmount, quote.decimals);
+  const legs = swap.paidLegs.length
+    ? swap.paidLegs
+    : [{ address: swap.quoteAddress, amount: swap.quoteAmount }];
+
   let usdValue = 0;
-  if (quotePriceUsd != null && quotePriceUsd > 0 && quoteUnits > 0) {
-    usdValue = quoteUnits * quotePriceUsd;
-  } else if (quote.symbol === "USDC" || quote.symbol === "USDT") {
-    usdValue = quoteUnits;
-  } else if (market?.priceUsd) {
+  for (const leg of legs) {
+    const meta = quoteMeta(leg.address);
+    const units = toUnitAmount(leg.amount, meta.decimals);
+    const price = quotePrices.get(normalizeAddress(leg.address));
+    if (price != null && price > 0 && units > 0) {
+      usdValue += units * price;
+    } else if (meta.symbol === "USDC" || meta.symbol === "USDT") {
+      usdValue += units;
+    }
+  }
+  if (usdValue <= 0 && market?.priceUsd) {
     usdValue = tokenUnits * market.priceUsd;
   }
   return { usdValue, tokenUnits, quoteUnits, quoteSymbol: quote.symbol };

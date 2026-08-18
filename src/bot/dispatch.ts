@@ -4,7 +4,7 @@ import { tokensByAddress, updateToken } from "../store/db.ts";
 import { getMarketSnapshot, getOhlcv, getQuotePriceUsd } from "../market/geckoterminal.ts";
 import { renderChartPng } from "../chart/render.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
-import { formatUsd, shortAddress } from "../lib/format.ts";
+import { formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
 import { enqueueAlert } from "./queue.ts";
 import type { ClassifiedSwap } from "../types.ts";
 
@@ -35,10 +35,17 @@ export function attachDispatcher(bot: Bot, provider: RpcProvider) {
     const tokens = tokensByAddress(swap.tokenAddress);
     if (!tokens.length) return;
 
-    const [market, quotePriceUsd] = await Promise.all([
+    const legs = swap.paidLegs.length
+      ? swap.paidLegs
+      : [{ address: swap.quoteAddress, amount: swap.quoteAmount }];
+    const [market, ...legPrices] = await Promise.all([
       getMarketSnapshot(swap.tokenAddress),
-      getQuotePriceUsd(swap.quoteAddress),
+      ...legs.map((leg) => getQuotePriceUsd(leg.address)),
     ]);
+    const quotePrices = new Map<string, number | null>();
+    legs.forEach((leg, i) => {
+      quotePrices.set(normalizeAddress(leg.address), legPrices[i] ?? null);
+    });
     const wallet = await senderOf(provider, swap.transactionHash);
 
     let chartPng: Buffer | null = null;
@@ -55,7 +62,7 @@ export function attachDispatcher(bot: Bot, provider: RpcProvider) {
     for (const token of tokens) {
       if (swap.side !== "buy") continue;
 
-      const values = valueFromSwap(swap, token, market, quotePriceUsd);
+      const values = valueFromSwap(swap, token, market, quotePrices);
       if (values.usdValue < token.minUsd) {
         console.log(
           `Skip ${token.symbol} buy ${formatUsd(values.usdValue)} < min ${formatUsd(token.minUsd)} tx ${shortAddress(swap.transactionHash)}`,

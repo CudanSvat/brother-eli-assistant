@@ -35,4 +35,23 @@ if (merged.tokenAmount !== 1000n) throw new Error(`token ${merged.tokenAmount}`)
 if (merged.quoteAmount !== 100n) throw new Error(`quote ${merged.quoteAmount}`);
 if (!merged.quoteAddress.endsWith("dc7")) throw new Error(`quote token ${merged.quoteAddress}`);
 if (merged.hopCount !== 3) throw new Error(`hops ${merged.hopCount}`);
+if (merged.paidLegs.length !== 1) throw new Error(`paid ${merged.paidLegs.length}`);
 console.log("AVNU netting OK", merged);
+
+// Parallel split: pay STRK and USDC into SLAY in the same tx (the latest AVNU fill).
+const USDC = "0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb";
+const SLAY = "0x02ab526354a39e7f5d272f327fa94e757df3688188d4a92c6dc3623ab79894e2";
+const split = netTransaction(
+  [
+    hop(SLAY, USDC, 8136730286556577575924n, -7143036n),
+    hop(SLAY, STRK, 4673635815427907174863n, -182252490075000000000n),
+  ],
+  SLAY,
+);
+if (!split) throw new Error("expected split merge");
+if (split.side !== "buy") throw new Error(`split side ${split.side}`);
+if (split.paidLegs.length !== 2) throw new Error(`split paid ${split.paidLegs.length}`);
+if (split.tokenAmount !== 8136730286556577575924n + 4673635815427907174863n) {
+  throw new Error(`split token ${split.tokenAmount}`);
+}
+console.log("AVNU split STRK+USDC OK", split.paidLegs.length);

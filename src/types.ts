@@ -42,12 +42,18 @@ export interface DecodedSwap {
   blockNumber: number;
 }
 
+export interface PaidLeg {
+  address: string;
+  amount: bigint;
+}
+
 export interface ClassifiedSwap {
   side: Side;
   tokenAddress: string;
   tokenAmount: bigint;
   quoteAddress: string;
   quoteAmount: bigint;
+  paidLegs: PaidLeg[];
   transactionHash: string;
   blockNumber: number;
   locker: string;
