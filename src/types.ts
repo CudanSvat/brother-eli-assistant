@@ -84,6 +84,7 @@ export interface Candle {
 }
 
 export type PendingAction =
+  | { kind: "connect_group" }
   | { kind: "add_token"; chatId: number }
   | { kind: "set_min"; chatId: number; tokenId: number }
   | { kind: "set_emoji"; chatId: number; tokenId: number }

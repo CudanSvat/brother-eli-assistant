@@ -91,15 +91,49 @@ export function alertKeyboard(
   return kb;
 }
 
-export function adminHomeText(count: number): string {
+export function adminHomeText(
+  count: number,
+  group?: { title?: string | null; chatId: number },
+): string {
+  const where = group
+    ? [
+        `Managing: <b>${escapeHtml(group.title || "group")}</b>`,
+        `ID: <code>${group.chatId}</code>`,
+        "",
+      ]
+    : [];
   return [
     `<b>${BOT_NAME}</b>`,
     BOT_TAGLINE,
     "",
+    ...where,
     `Tracked tokens: <b>${count}/${config.maxTokensPerGroup}</b>`,
     "",
     "Add a token by contract address. Buy alerts are live now. AVNU/Fibrous split routes in one transaction are merged into a single buy. More helper tools are coming.",
   ].join("\n");
+}
+
+export function connectGroupText(): string {
+  return [
+    `<b>${BOT_NAME}</b>`,
+    "Configure a group from this chat — same settings as in the group.",
+    "",
+    "You must be a <b>group admin</b>, and I must already be in the group.",
+    "",
+    "Send the group ID (starts with <code>-100</code>), or forward any message from the group here.",
+  ].join("\n");
+}
+
+export function connectGroupKeyboard(groups: { chatId: number; title: string | null }[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  groups.slice(0, 8).forEach((group, i) => {
+    const label = (group.title || String(group.chatId)).slice(0, 32);
+    kb.text(label, `g:open:${group.chatId}`);
+    if (i % 2 === 1) kb.row();
+  });
+  if (groups.length % 2 === 1) kb.row();
+  kb.text("Help", "t:help").text("Close", "t:close");
+  return kb;
 }
 
 export function tokenCardText(token: TokenSettings): string {
@@ -115,7 +149,7 @@ export function tokenCardText(token: TokenSettings): string {
   ].join("\n");
 }
 
-export function homeKeyboard(tokens: TokenSettings[]): InlineKeyboard {
+export function homeKeyboard(tokens: TokenSettings[], dm = false): InlineKeyboard {
   const kb = new InlineKeyboard();
   tokens.forEach((token, i) => {
     kb.text(`${token.symbol}`, `t:view:${token.id}`);
@@ -123,7 +157,9 @@ export function homeKeyboard(tokens: TokenSettings[]): InlineKeyboard {
   });
   if (tokens.length % 2 === 1) kb.row();
   kb.text("+ Add token", "t:add").text("Help", "t:help");
-  kb.row().text("Close", "t:close");
+  kb.row();
+  if (dm) kb.text("Switch group", "g:switch");
+  kb.text("Close", "t:close");
   return kb;
 }
 

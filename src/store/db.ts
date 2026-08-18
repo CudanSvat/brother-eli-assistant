@@ -91,6 +91,12 @@ export function openDb(): Database.Database {
     );
 
     CREATE INDEX IF NOT EXISTS idx_tokens_address ON tokens(address);
+
+    CREATE TABLE IF NOT EXISTS dm_sessions (
+      user_id INTEGER PRIMARY KEY,
+      chat_id INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
   const cols = db.pragma("table_info(tokens)") as { name: string }[];
   if (!cols.some((col) => col.name === "whale_usd")) {
@@ -107,6 +113,41 @@ export function upsertGroup(chatId: number, title?: string): void {
        ON CONFLICT(chat_id) DO UPDATE SET title = COALESCE(@title, title)`,
     )
     .run({ chatId, title: title ?? null, createdAt: Date.now() });
+}
+
+export function getGroup(chatId: number): { chatId: number; title: string | null } | undefined {
+  const row = openDb()
+    .prepare("SELECT chat_id, title FROM groups WHERE chat_id = ?")
+    .get(chatId) as { chat_id: number; title: string | null } | undefined;
+  return row ? { chatId: row.chat_id, title: row.title } : undefined;
+}
+
+export function listGroups(): { chatId: number; title: string | null }[] {
+  const rows = openDb()
+    .prepare("SELECT chat_id, title FROM groups ORDER BY created_at DESC")
+    .all() as { chat_id: number; title: string | null }[];
+  return rows.map((row) => ({ chatId: row.chat_id, title: row.title }));
+}
+
+export function getDmSession(userId: number): number | null {
+  const row = openDb()
+    .prepare("SELECT chat_id FROM dm_sessions WHERE user_id = ?")
+    .get(userId) as { chat_id: number } | undefined;
+  return row?.chat_id ?? null;
+}
+
+export function setDmSession(userId: number, chatId: number): void {
+  openDb()
+    .prepare(
+      `INSERT INTO dm_sessions (user_id, chat_id, updated_at)
+       VALUES (@userId, @chatId, @updatedAt)
+       ON CONFLICT(user_id) DO UPDATE SET chat_id = @chatId, updated_at = @updatedAt`,
+    )
+    .run({ userId, chatId, updatedAt: Date.now() });
+}
+
+export function clearDmSession(userId: number): void {
+  openDb().prepare("DELETE FROM dm_sessions WHERE user_id = ?").run(userId);
 }
 
 export function listTokens(chatId: number): TokenSettings[] {

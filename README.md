@@ -51,7 +51,9 @@ npm install
 npm run dev
 ```
 
-5. Add `@brotherelibuybot` to your Telegram group as admin with **post messages** and **send media**. Then send `/start` in the group.
+5. Add `@brotherelibuybot` to your Telegram group as admin with **post messages** and **send media**. Then either:
+   - send `/start` in the group, or
+   - open a DM with the bot, paste the group ID (starts with `-100`), or forward a message from the group. You still must be a group admin. Settings change the group; alerts still post there.
 
 ## Turn off Group Privacy (needed)
 
