@@ -106,10 +106,13 @@ SQLite file: `data/brother-eli.db`
 
 ## GitHub + Railway
 
-The bot token lives in `.env` and is gitignored. On Railway later you will set:
+Repo: [github.com/CudanSvat/brother-eli-assistant](https://github.com/CudanSvat/brother-eli-assistant)
 
-- `TELEGRAM_BOT_TOKEN`
+The bot token lives in `.env` and is gitignored. Production on Railway uses:
+
+- `TELEGRAM_BOT_TOKEN` (set in the Railway dashboard / CLI, never committed)
 - `STARKNET_RPC_URL` (use a dedicated key, not the public Lava URL)
 - `DATABASE_PATH=/data/brother-eli.db`
+- `NODE_VERSION=20`
 
-SQLite needs a persistent volume. Attach a Railway volume at `/data` or buys/settings will reset on every deploy. Start command is `npm start` (Node 20). `better-sqlite3` and the chart canvas package compile native code on install.
+SQLite needs a persistent volume mounted at `/data` or buys/settings reset on every deploy. Start command is `npm start` (Node 20). `better-sqlite3` and the chart canvas package compile native code on install.
