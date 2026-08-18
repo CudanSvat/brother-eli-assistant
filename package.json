@@ -1,0 +1,27 @@
+{
+  "name": "brother-eli-buybot",
+  "version": "1.0.0",
+  "description": "Brother Eli Assistant — Starknet helper for Telegram",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.80",
+    "better-sqlite3": "^12.4.1",
+    "dotenv": "^17.2.1",
+    "grammy": "^1.38.2",
+    "starknet": "^9.2.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
