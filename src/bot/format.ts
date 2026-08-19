@@ -36,9 +36,13 @@ export function buildAlert(input: AlertPayload): {
   const count = Math.min(50, Math.max(1, Math.round(usdValue / step)));
   const ladder = Array.from({ length: count }, () => emoji).join("");
   const execPrice = tokenUnits > 0 && usdValue > 0 ? usdValue / tokenUnits : null;
-  const change24 = market?.change24h;
-  const change =
-    change24 != null && Number.isFinite(change24) && change24 !== 0 ? formatPct(change24) : "";
+  const prevPrice = token.lastPriceUsd;
+  const trackedPrice = execPrice ?? market?.priceUsd ?? null;
+  const move =
+    trackedPrice != null && prevPrice != null && Number.isFinite(prevPrice) && prevPrice > 0
+      ? ((trackedPrice - prevPrice) / prevPrice) * 100
+      : null;
+  const moveText = move != null && Number.isFinite(move) && move !== 0 ? formatPct(move) : "";
   const title = `${escapeHtml(token.symbol)} Buy!`;
 
   const spentUsd = `Spent: ${formatUsd(usdValue)}`;
@@ -59,9 +63,11 @@ export function buildAlert(input: AlertPayload): {
     ...paidLines,
     `Got: ${formatTokenAmount(tokenUnits)} ${escapeHtml(token.symbol)}`,
     swap.hopCount > 1 ? `Route: 1 buy across ${swap.hopCount} pools` : "",
-    execPrice
-      ? `Price: ${formatTokenPrice(execPrice)} (this buy)${change ? `  (${change} 24h)` : ""}`
-      : `Price: ${formatTokenPrice(market?.priceUsd)}${change ? `  (${change} 24h)` : ""}`,
+    trackedPrice
+      ? `Price: ${formatTokenPrice(trackedPrice)}${execPrice != null ? " (this buy)" : ""}${
+          moveText ? `  (${moveText} vs prev)` : ""
+        }`
+      : `Price: —`,
     `MC ${formatUsd(market?.marketCap)} · Liq ${formatUsd(market?.liquidityUsd)} · Vol ${formatUsd(market?.volume24h)}`,
   ].filter((line) => line !== "");
 
