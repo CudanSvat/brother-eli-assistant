@@ -68,6 +68,16 @@ export function formatUsd(value: number | null | undefined): string {
   return `$${value.toExponential(2)}`;
 }
 
+/** Token unit price — extra decimals for microcaps. */
+export function formatTokenPrice(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1) return `$${value.toFixed(4)}`;
+  if (abs >= 0.01) return `$${value.toFixed(5)}`;
+  if (abs >= 0.0001) return `$${value.toFixed(6)}`;
+  return `$${value.toFixed(8)}`;
+}
+
 export function formatTokenAmount(amount: number): string {
   if (!Number.isFinite(amount)) return "—";
   const abs = Math.abs(amount);

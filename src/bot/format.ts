@@ -4,6 +4,7 @@ import {
   escapeHtml,
   formatPct,
   formatTokenAmount,
+  formatTokenPrice,
   formatUsd,
   normalizeAddress,
   quoteMeta,
@@ -34,7 +35,10 @@ export function buildAlert(input: AlertPayload): {
   const step = Math.max(1, token.emojiStepUsd);
   const count = Math.min(50, Math.max(1, Math.round(usdValue / step)));
   const ladder = Array.from({ length: count }, () => emoji).join("");
-  const change = formatPct(market?.change1h);
+  const execPrice = tokenUnits > 0 && usdValue > 0 ? usdValue / tokenUnits : null;
+  const change24 = market?.change24h;
+  const change =
+    change24 != null && Number.isFinite(change24) && change24 !== 0 ? formatPct(change24) : "";
   const title = `${escapeHtml(token.symbol)} Buy!`;
 
   const spentUsd = `Spent: ${formatUsd(usdValue)}`;
@@ -55,7 +59,9 @@ export function buildAlert(input: AlertPayload): {
     ...paidLines,
     `Got: ${formatTokenAmount(tokenUnits)} ${escapeHtml(token.symbol)}`,
     swap.hopCount > 1 ? `Route: 1 buy across ${swap.hopCount} pools` : "",
-    `Price: ${formatUsd(market?.priceUsd)}${change ? `  (${change} 1h)` : ""}`,
+    execPrice
+      ? `Price: ${formatTokenPrice(execPrice)} (this buy)${change ? `  (${change} 24h)` : ""}`
+      : `Price: ${formatTokenPrice(market?.priceUsd)}${change ? `  (${change} 24h)` : ""}`,
     `MC ${formatUsd(market?.marketCap)} · Liq ${formatUsd(market?.liquidityUsd)} · Vol ${formatUsd(market?.volume24h)}`,
   ].filter((line) => line !== "");
 

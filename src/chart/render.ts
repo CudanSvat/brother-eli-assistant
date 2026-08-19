@@ -33,6 +33,8 @@ const C = {
 export interface ChartRenderOptions {
   quote?: string;
   intervalLabel?: string;
+  /** Stamp the live buy onto the chart when Gecko OHLCV is behind. */
+  spot?: { price: number; volumeUsd?: number; timeSec?: number };
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -225,6 +227,56 @@ function selectPlotCandles(raw: Candle[]): {
   return { candles, skippedEmpty, intervalMs: nativeMs };
 }
 
+/** Merge this buy's price into OHLCV when Gecko has not caught up yet. */
+function applySpot(
+  raw: Candle[],
+  spot: { price: number; volumeUsd?: number; timeSec?: number },
+): Candle[] {
+  if (!finite(spot.price)) return raw;
+  const candles = validCandles(raw);
+  const vol = spot.volumeUsd && spot.volumeUsd > 0 ? spot.volumeUsd : 0;
+  const nowSec = spot.timeSec ?? Math.floor(Date.now() / 1000);
+  if (!candles.length) {
+    return [{ time: nowSec, open: spot.price, high: spot.price, low: spot.price, close: spot.price, volume: vol }];
+  }
+
+  const last = candles[candles.length - 1]!;
+  const { medianMs } = intervalStats(candles);
+  const bucketSec = Math.floor(nowSec / (medianMs / 1000)) * (medianMs / 1000);
+  const sameBucket = Math.abs(candleMs(last.time) - bucketSec * 1000) < medianMs / 2;
+
+  if (sameBucket) {
+    return [
+      ...candles.slice(0, -1),
+      {
+        time: last.time,
+        open: last.open,
+        high: Math.max(last.high, spot.price),
+        low: Math.min(last.low, spot.price),
+        close: spot.price,
+        volume: (last.volume || 0) + vol,
+      },
+    ];
+  }
+
+  if (nowSec * 1000 >= candleMs(last.time)) {
+    const open = last.close;
+    return [
+      ...candles,
+      {
+        time: bucketSec,
+        open,
+        high: Math.max(open, spot.price),
+        low: Math.min(open, spot.price),
+        close: spot.price,
+        volume: vol,
+      },
+    ];
+  }
+
+  return candles;
+}
+
 function priceWindow(candles: Candle[]): { min: number; max: number } {
   const samples = candles.flatMap((c) => [c.open, c.close, c.high, c.low]).sort((a, b) => a - b);
   let min = percentile(samples, 4);
@@ -260,7 +312,8 @@ export function renderChartPng(
 ): Buffer | null {
   registerInterFonts();
   const quote = options.quote?.trim() || "USD";
-  const { candles, skippedEmpty, intervalMs } = selectPlotCandles(raw);
+  const stamped = options.spot ? applySpot(raw, options.spot) : raw;
+  const { candles, skippedEmpty, intervalMs } = selectPlotCandles(stamped);
   if (candles.length < 3) return null;
 
   const canvas = createCanvas(WIDTH, HEIGHT);

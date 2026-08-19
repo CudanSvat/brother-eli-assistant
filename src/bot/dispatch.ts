@@ -3,7 +3,7 @@ import { tokensByAddress, updateToken } from "../store/db.ts";
 import { getMarketSnapshot, getOhlcv, getQuotePriceUsd } from "../market/geckoterminal.ts";
 import { renderChartPng } from "../chart/render.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
-import { formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
+import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
 import { enqueueAlert } from "./queue.ts";
 import type { ClassifiedSwap } from "../types.ts";
 
@@ -34,6 +34,12 @@ export function attachDispatcher(bot: Bot) {
       quotePrices.set(normalizeAddress(leg.address), legPrices[i] ?? null);
     });
 
+    const sampleValues = valueFromSwap(swap, tokens[0]!, market, quotePrices);
+    const spotPrice =
+      sampleValues.usdValue > 0 && sampleValues.tokenUnits > 0
+        ? sampleValues.usdValue / sampleValues.tokenUnits
+        : null;
+
     let chartPng: Buffer | null = null;
     const needsChart = tokens.some((token) => token.chartEnabled);
     if (needsChart) {
@@ -41,6 +47,9 @@ export function attachDispatcher(bot: Bot) {
         const candles = await getOhlcv(market?.pairAddress ?? tokens[0]?.pairAddress);
         chartPng = renderChartPng(tokens[0]!.symbol, candles, {
           quote: market?.quoteSymbol ?? "USD",
+          spot: spotPrice
+            ? { price: spotPrice, volumeUsd: sampleValues.usdValue, timeSec: Math.floor(Date.now() / 1000) }
+            : undefined,
         });
       } catch (error) {
         console.warn("Chart render failed:", error);
@@ -82,12 +91,16 @@ export function attachDispatcher(bot: Bot) {
       });
 
       if (market?.priceUsd && token.priceAlertPct != null && token.lastPriceUsd) {
-        const move = ((market.priceUsd - token.lastPriceUsd) / token.lastPriceUsd) * 100;
+        const trackPrice =
+          values.usdValue > 0 && values.tokenUnits > 0
+            ? values.usdValue / values.tokenUnits
+            : market.priceUsd;
+        const move = ((trackPrice - token.lastPriceUsd) / token.lastPriceUsd) * 100;
         if (Math.abs(move) >= token.priceAlertPct) {
           const dir = move >= 0 ? "up" : "down";
           enqueueAlert(bot.api, {
             chatId: token.chatId,
-            caption: `<b>${token.symbol} price ${dir} ${move.toFixed(1)}%</b>\nNow ${formatUsd(market.priceUsd)}`,
+            caption: `<b>${token.symbol} price ${dir} ${move.toFixed(1)}%</b>\nNow ${formatTokenPrice(trackPrice)}`,
             links: card.links,
             gifUrl: null,
             chartPng: token.chartEnabled ? chartPng : null,
@@ -95,10 +108,14 @@ export function attachDispatcher(bot: Bot) {
         }
       }
 
-      if (market?.priceUsd) {
+      const trackPrice =
+        values.usdValue > 0 && values.tokenUnits > 0
+          ? values.usdValue / values.tokenUnits
+          : market?.priceUsd ?? null;
+      if (trackPrice) {
         updateToken(token.id, {
-          lastPriceUsd: market.priceUsd,
-          pairAddress: market.pairAddress ?? token.pairAddress,
+          lastPriceUsd: trackPrice,
+          pairAddress: market?.pairAddress ?? token.pairAddress,
         });
       }
     }
