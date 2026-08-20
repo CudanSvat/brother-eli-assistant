@@ -35,6 +35,11 @@ export interface ChartRenderOptions {
   intervalLabel?: string;
   /** Stamp the live buy onto the chart when Gecko OHLCV is behind. */
   spot?: { price: number; volumeUsd?: number; timeSec?: number };
+  /**
+   * Buy cards skip empty/no-trade buckets. Command charts keep the full
+   * continuous series so longer windows stay readable.
+   */
+  keepEmpty?: boolean;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -208,13 +213,23 @@ function clipOutliers(raw: Candle[]): Candle[] {
   });
 }
 
-function selectPlotCandles(raw: Candle[]): {
+function selectPlotCandles(
+  raw: Candle[],
+  keepEmpty = false,
+): {
   candles: Candle[];
   skippedEmpty: boolean;
   intervalMs: number;
 } {
   const valid = validCandles(raw);
   const { nativeMs } = intervalStats(valid);
+  if (keepEmpty) {
+    return {
+      candles: clipOutliers(valid),
+      skippedEmpty: false,
+      intervalMs: nativeMs,
+    };
+  }
   const traded = valid.filter((c) => !isEmptyCandle(c));
   const useFiltered = traded.length >= MIN_TRADE_CANDLES;
   const candles = clipOutliers(useFiltered ? traded : valid);
@@ -313,8 +328,8 @@ export function renderChartPng(
   registerInterFonts();
   const quote = options.quote?.trim() || "USD";
   const stamped = options.spot ? applySpot(raw, options.spot) : raw;
-  const { candles, skippedEmpty, intervalMs } = selectPlotCandles(stamped);
-  if (candles.length < 3) return null;
+  const { candles, skippedEmpty, intervalMs } = selectPlotCandles(stamped, options.keepEmpty === true);
+  if (candles.length < 2) return null;
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext("2d");

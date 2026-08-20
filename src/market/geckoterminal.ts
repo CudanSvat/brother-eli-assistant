@@ -167,30 +167,37 @@ interface FetchPlan {
   label: string;
 }
 
-/** Gecko fetch plans per UI window (best → fallback). */
+/** Gecko fetch plans per UI window — candle size scales with range (~60–120 bars). */
 const WINDOW_PLANS: Record<ChartWindow, FetchPlan[]> = {
   "6h": [
-    { unit: "minute", aggregate: 5, limit: 100, label: "5m" },
+    { unit: "minute", aggregate: 5, limit: 80, label: "5m" },
+    { unit: "minute", aggregate: 1, limit: 400, label: "1m" },
     { unit: "minute", aggregate: 15, limit: 40, label: "15m" },
   ],
   "1d": [
     { unit: "minute", aggregate: 15, limit: 120, label: "15m" },
     { unit: "minute", aggregate: 5, limit: 300, label: "5m" },
+    { unit: "hour", aggregate: 1, limit: 30, label: "1h" },
   ],
   "3d": [
-    { unit: "minute", aggregate: 15, limit: 300, label: "15m" },
     { unit: "hour", aggregate: 1, limit: 80, label: "1h" },
+    { unit: "minute", aggregate: 15, limit: 300, label: "15m" },
+    { unit: "hour", aggregate: 4, limit: 24, label: "4h" },
   ],
   "7d": [
-    { unit: "hour", aggregate: 1, limit: 180, label: "1h" },
+    { unit: "hour", aggregate: 1, limit: 200, label: "1h" },
+    { unit: "hour", aggregate: 4, limit: 50, label: "4h" },
+    { unit: "day", aggregate: 1, limit: 14, label: "1d" },
     { unit: "minute", aggregate: 15, limit: 700, label: "15m" },
   ],
   "1m": [
     { unit: "hour", aggregate: 4, limit: 200, label: "4h" },
     { unit: "day", aggregate: 1, limit: 40, label: "1d" },
+    { unit: "hour", aggregate: 12, limit: 80, label: "12h" },
   ],
   all: [
-    { unit: "day", aggregate: 1, limit: 365, label: "1d" },
+    { unit: "day", aggregate: 1, limit: 500, label: "1d" },
+    { unit: "hour", aggregate: 12, limit: 500, label: "12h" },
     { unit: "hour", aggregate: 4, limit: 500, label: "4h" },
   ],
 };
@@ -282,26 +289,40 @@ export async function getOhlcvForWindow(
 
   const key = `${pairAddress.toLowerCase()}:${window}`;
   const hit = ohlcvCache.get(key);
-  if (hit && Date.now() - hit.at < 15_000) {
+  // Never serve a cached empty miss for long — that stuck the /chart buttons.
+  if (hit && Date.now() - hit.at < 15_000 && hit.candles.length > 0) {
     return { candles: hit.candles, intervalLabel: hit.label, window };
   }
 
   const plans = WINDOW_PLANS[window];
+  let best: { candles: Candle[]; label: string } | null = null;
+
   for (const network of [NETWORK, "starknet"]) {
     for (const plan of plans) {
       try {
         const raw = await tryOhlcv(network, pairAddress, plan.unit, plan.aggregate, plan.limit);
         const candles = filterByWindow(raw, window);
-        if (candles.length >= 3) {
+        if (candles.length < 2) continue;
+        if (!best || candles.length > best.candles.length) {
+          best = { candles, label: plan.label };
+        }
+        // Prefer a plan that fills the window reasonably (~40+ bars).
+        if (candles.length >= 40) {
           ohlcvCache.set(key, { at: Date.now(), candles, label: plan.label });
           return { candles, intervalLabel: plan.label, window };
         }
-      } catch {
-        // try next plan / network
+      } catch (error) {
+        console.warn(`OHLCV ${window} ${plan.unit}/${plan.aggregate} failed:`, error);
       }
     }
+    if (best && best.candles.length >= 8) break;
   }
 
-  ohlcvCache.set(key, { at: Date.now(), candles: [], label: plans[0]!.label });
+  if (best) {
+    ohlcvCache.set(key, { at: Date.now(), candles: best.candles, label: best.label });
+    return { candles: best.candles, intervalLabel: best.label, window };
+  }
+
+  // Do not cache empty misses — next tap should retry immediately.
   return { candles: [], intervalLabel: plans[0]!.label, window };
 }

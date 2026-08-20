@@ -57,14 +57,20 @@ async function buildChart(
 ): Promise<{ png: Buffer; caption: string } | null> {
   const market = await getMarketSnapshot(token.address);
   const pair = market?.pairAddress ?? token.pairAddress;
+  if (!pair) return null;
+
   const { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
+  if (candles.length < 2) return null;
+
   const png = renderChartPng(token.symbol, candles, {
     quote: market?.quoteSymbol ?? "USD",
     intervalLabel,
+    keepEmpty: true,
   });
   if (!png) return null;
+
   const caption = [
-    `<b>${token.symbol}</b> · ${chartWindowLabel(window)}`,
+    `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${intervalLabel}`,
     `Price: ${formatTokenPrice(market?.priceUsd)}`,
   ].join("\n");
   return { png, caption };
@@ -76,10 +82,24 @@ async function sendOrEditChart(
   window: ChartWindow,
   edit: boolean,
 ): Promise<void> {
-  const built = await buildChart(token, window);
+  let built: { png: Buffer; caption: string } | null = null;
+  try {
+    built = await buildChart(token, window);
+  } catch (error) {
+    console.warn("Chart build failed:", error);
+  }
+
   if (!built) {
     if (ctx.callbackQuery) {
-      await ctx.answerCallbackQuery({ text: "No data for that window" });
+      // Keep the previous photo; only toast. Never leave the UI stuck.
+      try {
+        await ctx.answerCallbackQuery({
+          text: `No ${chartWindowLabel(window)} data yet — try another window`,
+          show_alert: false,
+        });
+      } catch {
+        // callback may already be answered
+      }
       return;
     }
     await ctx.reply(`No chart data for <b>${token.symbol}</b> yet. Try another window.`, {
@@ -100,16 +120,28 @@ async function sendOrEditChart(
         },
         { reply_markup: markup },
       );
-      await ctx.answerCallbackQuery({ text: chartWindowLabel(window) });
+      try {
+        await ctx.answerCallbackQuery({ text: chartWindowLabel(window) });
+      } catch {
+        // already answered with loading
+      }
       return;
     } catch (error) {
       console.warn("Chart edit failed:", error);
-      await ctx.answerCallbackQuery({ text: "Could not refresh chart" });
+      try {
+        await ctx.answerCallbackQuery({ text: "Could not refresh — try again" });
+      } catch {
+        // ignore
+      }
       return;
     }
   }
 
-  if (ctx.callbackQuery) await ctx.answerCallbackQuery();
+  try {
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery();
+  } catch {
+    // ignore
+  }
   await ctx.replyWithPhoto(new InputFile(built.png, "chart.png"), {
     caption: built.caption,
     parse_mode: "HTML",
@@ -162,6 +194,12 @@ export function registerChartCommand(bot: Bot): void {
     if (!token || !canUseToken(ctx, token)) {
       await ctx.answerCallbackQuery({ text: "Token not available here" });
       return;
+    }
+
+    try {
+      await ctx.answerCallbackQuery({ text: `Loading ${chartWindowLabel(windowRaw)}…` });
+    } catch {
+      // ignore expired queries
     }
 
     const edit = Boolean(ctx.callbackQuery.message?.photo);
