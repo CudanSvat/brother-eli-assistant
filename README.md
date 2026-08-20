@@ -18,7 +18,7 @@ Price: $0.000482  (+8.2% 1h)
 MC $482K · Liq $91K · Vol $44K
 ```
 
-Buttons: TX · Gecko · Ekubo · AVNU. With a GIF set, also **Chart** / **GIF** to slide the media.
+Buttons: TX · Gecko Chart · Ekubo · AVNU. With a GIF set, also **Chart** / **GIF** to slide the media.
 
 ## AVNU split routes
 

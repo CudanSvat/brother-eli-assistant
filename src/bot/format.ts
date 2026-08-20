@@ -94,7 +94,7 @@ export function alertKeyboard(
 ): InlineKeyboard {
   const kb = new InlineKeyboard()
     .url("TX", links.tx)
-    .url("Gecko", links.gecko)
+    .url("Gecko Chart", links.gecko)
     .url("Ekubo", links.ekubo)
     .url("AVNU", links.avnu);
   if (toggle) {
