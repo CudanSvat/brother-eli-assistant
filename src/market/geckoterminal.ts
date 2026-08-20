@@ -1,5 +1,5 @@
-import { QUOTE_TOKENS } from "../config.ts";
-import { fetchJson, normalizeAddress } from "../lib/format.ts";
+import { QUOTE_TOKENS, config } from "../config.ts";
+import { fetchJson, normalizeAddress, sleep } from "../lib/format.ts";
 import { getMarketForToken as getDexMarket } from "./dexscreener.ts";
 import type { Candle, MarketSnapshot } from "../types.ts";
 
@@ -8,6 +8,23 @@ const CACHE_MS = 60_000;
 const marketCache = new Map<string, { at: number; value: MarketSnapshot | null }>();
 const ohlcvCache = new Map<string, { at: number; candles: Candle[]; label: string }>();
 let geckoCooldownUntil = 0;
+
+type OhlcvUnit = "minute" | "hour" | "day";
+
+function ohlcvBaseUrl(pool: string, unit: OhlcvUnit): string {
+  if (config.coingeckoApiKey) {
+    return `https://pro-api.coingecko.com/api/v3/onchain/networks/${NETWORK}/pools/${pool}/ohlcv/${unit}`;
+  }
+  return `https://api.geckoterminal.com/api/v2/networks/${NETWORK}/pools/${pool}/ohlcv/${unit}`;
+}
+
+function ohlcvHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (config.coingeckoApiKey) {
+    headers["x-cg-pro-api-key"] = config.coingeckoApiKey;
+  }
+  return headers;
+}
 
 interface GeckoTokenResponse {
   data?: {
@@ -172,8 +189,6 @@ const WINDOW_MS: Record<ChartWindow, number> = {
 const SERIES_CACHE_MS = 90_000;
 const BUYCARD_CACHE_MS = 20_000;
 
-type OhlcvUnit = "minute" | "hour" | "day";
-
 interface SeriesPack {
   at: number;
   fine: Candle[]; // 5m
@@ -309,17 +324,24 @@ async function tryOhlcv(
   unit: OhlcvUnit,
   aggregate: number,
   limit: number,
+  opts: { beforeTimestamp?: number; includeEmpty?: boolean } = {},
 ): Promise<Candle[]> {
   if (Date.now() < geckoCooldownUntil) {
     throw new Error(`429 Too Many Requests (cooldown ${Math.ceil((geckoCooldownUntil - Date.now()) / 1000)}s)`);
   }
 
-  const url =
-    `https://api.geckoterminal.com/api/v2/networks/${NETWORK}/pools/${pool}` +
-    `/ohlcv/${unit}?aggregate=${aggregate}&limit=${limit}&currency=usd`;
+  const params = new URLSearchParams({
+    aggregate: String(aggregate),
+    limit: String(limit),
+    currency: "usd",
+  });
+  if (opts.beforeTimestamp) params.set("before_timestamp", String(opts.beforeTimestamp));
+  if (opts.includeEmpty) params.set("include_empty_intervals", "true");
+
+  const url = `${ohlcvBaseUrl(pool, unit)}?${params}`;
 
   try {
-    const body = await fetchJson<OhlcvResponse>(url);
+    const body = await fetchJson<OhlcvResponse>(url, 12_000, ohlcvHeaders());
     const list = body.data?.attributes?.ohlcv_list ?? [];
     return list
       .map(([time, open, high, low, close, volume]) => ({
@@ -336,14 +358,46 @@ async function tryOhlcv(
     if (status === 429) {
       geckoCooldownUntil = Date.now() + 20_000;
       console.warn(`Gecko OHLCV rate-limited; cooling down 20s`);
-    } else if (status !== 404) {
+    } else if (status !== 404 && status !== 401) {
       console.warn(`Gecko OHLCV ${unit}/${aggregate} failed:`, status ?? error);
     }
     throw error;
   }
 }
 
-/** At most one request in flight per pool; max 4 Gecko calls on a cold load. */
+/** Walk backwards with before_timestamp until empty/401. Public API stops ~180d without a key. */
+async function fetchDayHistory(pool: string): Promise<Candle[]> {
+  const byTime = new Map<number, Candle>();
+  let before: number | undefined;
+  const maxPages = config.coingeckoApiKey ? 12 : 2;
+
+  for (let page = 0; page < maxPages; page++) {
+    if (Date.now() < geckoCooldownUntil) break;
+    try {
+      const batch = await tryOhlcv(pool, "day", 1, 1000, {
+        beforeTimestamp: before,
+        includeEmpty: true,
+      });
+      if (!batch.length) break;
+      for (const c of batch) byTime.set(candleSec(c), c);
+      const oldest = Math.min(...batch.map((c) => candleSec(c)));
+      if (before != null && oldest >= before) break;
+      before = oldest;
+      if (batch.length < 50) break;
+      if (page + 1 < maxPages) await sleep(350);
+    } catch (error) {
+      const status = parseOhlcvStatus(error);
+      // Public plan: older than ~180d → 401. Stop; keep what we have.
+      if (status === 401 || status === 404) break;
+      if (status === 429) break;
+      throw error;
+    }
+  }
+
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+/** At most one request in flight per pool; max a few Gecko calls on a cold load. */
 async function loadSeriesPack(pool: string): Promise<SeriesPack> {
   const key = pool.toLowerCase();
   const hit = seriesPackCache.get(key);
@@ -361,21 +415,30 @@ async function loadSeriesPack(pool: string): Promise<SeriesPack> {
       day: hit?.day ?? [],
     };
 
-    const loads: Array<{ field: keyof Omit<SeriesPack, "at">; unit: OhlcvUnit; agg: number; limit: number }> = [
+    const shortLoads: Array<{ field: "fine" | "mid" | "hour"; unit: OhlcvUnit; agg: number; limit: number }> = [
       { field: "fine", unit: "minute", agg: 5, limit: 90 },
       { field: "mid", unit: "minute", agg: 15, limit: 120 },
       { field: "hour", unit: "hour", agg: 1, limit: 200 },
-      // Gecko max is typically 1000 — enough for full history on thin pools.
-      { field: "day", unit: "day", agg: 1, limit: 1000 },
     ];
 
-    for (const load of loads) {
+    for (const load of shortLoads) {
       if (Date.now() < geckoCooldownUntil) break;
       try {
-        const candles = await tryOhlcv(pool, load.unit, load.agg, load.limit);
+        const candles = await tryOhlcv(pool, load.unit, load.agg, load.limit, {
+          includeEmpty: load.field !== "fine",
+        });
         if (candles.length) pack[load.field] = candles;
       } catch {
         if (Date.now() < geckoCooldownUntil) break;
+      }
+    }
+
+    if (Date.now() >= geckoCooldownUntil) {
+      try {
+        const days = await fetchDayHistory(pool);
+        if (days.length) pack.day = days;
+      } catch {
+        // keep prior day series
       }
     }
 

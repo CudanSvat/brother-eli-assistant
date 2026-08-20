@@ -6,6 +6,8 @@ export const config = {
   rpcUrl: process.env.STARKNET_RPC_URL?.trim() || "https://api.cartridge.gg/x/starknet/mainnet",
   wsUrl: process.env.STARKNET_WS_URL?.trim() || "",
   databasePath: process.env.DATABASE_PATH?.trim() || "data/brother-eli.db",
+  /** CoinGecko Onchain / Analyst key unlocks OHLCV beyond the public ~180 day cap. */
+  coingeckoApiKey: process.env.COINGECKO_API_KEY?.trim() || process.env.GECKOTERMINAL_API_KEY?.trim() || "",
   maxTokensPerGroup: 10,
   hopFlushMs: 1_500,
   pollIntervalMs: 4_000,

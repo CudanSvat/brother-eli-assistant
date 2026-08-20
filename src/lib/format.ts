@@ -106,13 +106,17 @@ export function toUnitAmount(raw: bigint, decimals: number): number {
   return Number(raw) / 10 ** decimals;
 }
 
-export async function fetchJson<T>(url: string, timeoutMs = 8_000): Promise<T> {
+export async function fetchJson<T>(
+  url: string,
+  timeoutMs = 8_000,
+  headers: Record<string, string> = { accept: "application/json" },
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { accept: "application/json" },
+      headers,
     });
     if (!res.ok) {
       throw new Error(`${res.status} ${res.statusText} for ${url}`);

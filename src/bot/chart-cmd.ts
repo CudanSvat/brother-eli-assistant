@@ -10,6 +10,7 @@ import {
   isChartWindow,
   type ChartWindow,
 } from "../market/geckoterminal.ts";
+import { config } from "../config.ts";
 import { getDmSession, getToken, listTokens } from "../store/db.ts";
 import type { TokenSettings } from "../types.ts";
 
@@ -75,8 +76,9 @@ async function buildChart(
   if (!png) return null;
 
   const price = market?.priceUsd ?? token.lastPriceUsd;
+  const allNote = window === "all" && !config.coingeckoApiKey ? " · public API ~180d max" : "";
   const caption = [
-    `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${intervalLabel}`,
+    `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${intervalLabel}${allNote}`,
     `Price: ${formatTokenPrice(price)}`,
   ].join("\n");
   return { png, caption };
