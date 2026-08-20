@@ -56,13 +56,42 @@ async function buildChart(
   token: TokenSettings,
   window: ChartWindow,
 ): Promise<{ png: Buffer; caption: string } | null> {
-  let market = null as Awaited<ReturnType<typeof getMarketSnapshot>>;
+  const knownPair = token.pairAddress;
+
+  // When we already know the pool, fetch candles immediately and enrich price in parallel.
+  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
+  let pair = knownPair;
+  if (knownPair) {
+    const [m, ohlcv] = await Promise.all([
+      getMarketSnapshot(token.address).catch(() => null),
+      getOhlcvForWindow(knownPair, window),
+    ]);
+    market = m;
+    const { candles, intervalLabel } = ohlcv;
+    if (candles.length < 2) return null;
+    const png = renderChartPng(token.symbol, candles, {
+      quote: market?.quoteSymbol ?? "USD",
+      intervalLabel,
+      keepEmpty: true,
+    });
+    if (!png) return null;
+    const price = market?.priceUsd ?? token.lastPriceUsd;
+    const allNote = window === "all" && !config.coingeckoApiKey ? " · public API ~180d max" : "";
+    return {
+      png,
+      caption: [
+        `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${intervalLabel}${allNote}`,
+        `Price: ${formatTokenPrice(price)}`,
+      ].join("\n"),
+    };
+  }
+
   try {
     market = await getMarketSnapshot(token.address);
   } catch {
     market = null;
   }
-  const pair = market?.pairAddress ?? token.pairAddress;
+  pair = market?.pairAddress ?? null;
   if (!pair) return null;
 
   const { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
@@ -191,7 +220,7 @@ export function registerChartCommand(bot: Bot): void {
     await sendOrEditChart(ctx, token, DEFAULT_CHART_WINDOW, false);
   });
 
-  bot.callbackQuery(/^ch:(\d+):(6h|1d|3d|7d|1m|all)$/, async (ctx) => {
+  bot.callbackQuery(/^ch:(\d+):(1d|3d|7d|1m|all)$/, async (ctx) => {
     const tokenId = Number(ctx.match![1]);
     const windowRaw = ctx.match![2]!;
     if (!isChartWindow(windowRaw)) {

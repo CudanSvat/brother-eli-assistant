@@ -275,7 +275,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         "",
         "Admins: open /start in the group, or DM me and paste the group ID (starts with -100).",
         "You must be a group admin either way. Alerts still post in the group.",
-        "Anyone: /chart for a live candlestick (tap 6h / 1d / 3d / 7d / 1M / All to refresh).",
+        "Anyone: /chart for a live candlestick (tap 1d / 3d / 7d / 1M / All to refresh).",
         "Tap Close or send /cancel to exit the panel. Members just watch the feed.",
         "",
         "<b>Step</b> = USD per emoji. $50 step and a $250 buy → 5 emojis.",

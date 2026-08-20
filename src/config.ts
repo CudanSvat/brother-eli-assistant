@@ -9,8 +9,8 @@ export const config = {
   /** CoinGecko Onchain / Analyst key unlocks OHLCV beyond the public ~180 day cap. */
   coingeckoApiKey: process.env.COINGECKO_API_KEY?.trim() || process.env.GECKOTERMINAL_API_KEY?.trim() || "",
   maxTokensPerGroup: 10,
-  hopFlushMs: 1_500,
-  pollIntervalMs: 4_000,
+  hopFlushMs: 700,
+  pollIntervalMs: 2_000,
   chartCacheMs: 15_000,
 };
 

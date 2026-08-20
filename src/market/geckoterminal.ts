@@ -171,13 +171,12 @@ export async function getQuotePriceUsd(quoteAddress: string): Promise<number | n
   return dex?.priceUsd && dex.priceUsd > 0 ? dex.priceUsd : null;
 }
 
-export type ChartWindow = "6h" | "1d" | "3d" | "7d" | "1m" | "all";
+export type ChartWindow = "1d" | "3d" | "7d" | "1m" | "all";
 
-export const CHART_WINDOWS: ChartWindow[] = ["6h", "1d", "3d", "7d", "1m", "all"];
-export const DEFAULT_CHART_WINDOW: ChartWindow = "1d";
+export const CHART_WINDOWS: ChartWindow[] = ["1d", "3d", "7d", "1m", "all"];
+export const DEFAULT_CHART_WINDOW: ChartWindow = "7d";
 
 const WINDOW_MS: Record<ChartWindow, number> = {
-  "6h": 6 * 3_600_000,
   "1d": 24 * 3_600_000,
   "3d": 3 * 24 * 3_600_000,
   "7d": 7 * 24 * 3_600_000,
@@ -205,7 +204,6 @@ const WINDOW_PLAN: Record<
   ChartWindow,
   { field: keyof Omit<SeriesPack, "at">; label: string; intervalSec: number }
 > = {
-  "6h": { field: "fine", label: "5m", intervalSec: 5 * 60 },
   "1d": { field: "mid", label: "15m", intervalSec: 15 * 60 },
   "3d": { field: "hour", label: "1h", intervalSec: 60 * 60 },
   "7d": { field: "hour", label: "1h", intervalSec: 60 * 60 },
@@ -397,11 +395,14 @@ async function fetchDayHistory(pool: string): Promise<Candle[]> {
   return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
-/** At most one request in flight per pool; max a few Gecko calls on a cold load. */
-async function loadSeriesPack(pool: string): Promise<SeriesPack> {
+/** At most one warm-up in flight per pool. Preferred series loads first for fast /chart. */
+async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<SeriesPack> {
   const key = pool.toLowerCase();
+  const preferField = prefer ? WINDOW_PLAN[prefer].field : "hour";
   const hit = seriesPackCache.get(key);
-  if (hit && Date.now() - hit.at < SERIES_CACHE_MS) return hit;
+  if (hit && Date.now() - hit.at < SERIES_CACHE_MS && hit[preferField].length >= 2) {
+    return hit;
+  }
 
   const inflight = seriesPackInflight.get(key);
   if (inflight) return inflight;
@@ -415,35 +416,48 @@ async function loadSeriesPack(pool: string): Promise<SeriesPack> {
       day: hit?.day ?? [],
     };
 
-    const shortLoads: Array<{ field: "fine" | "mid" | "hour"; unit: OhlcvUnit; agg: number; limit: number }> = [
-      { field: "fine", unit: "minute", agg: 5, limit: 90 },
-      { field: "mid", unit: "minute", agg: 15, limit: 120 },
-      { field: "hour", unit: "hour", agg: 1, limit: 200 },
-    ];
-
-    for (const load of shortLoads) {
-      if (Date.now() < geckoCooldownUntil) break;
+    const loadField = async (field: keyof Omit<SeriesPack, "at">): Promise<void> => {
+      if (pack[field].length >= 2 || Date.now() < geckoCooldownUntil) return;
       try {
-        const candles = await tryOhlcv(pool, load.unit, load.agg, load.limit, {
-          includeEmpty: load.field !== "fine",
+        if (field === "day") {
+          const days = await fetchDayHistory(pool);
+          if (days.length) pack.day = days;
+          return;
+        }
+        const map = {
+          fine: { unit: "minute" as const, agg: 5, limit: 90, empty: false },
+          mid: { unit: "minute" as const, agg: 15, limit: 120, empty: true },
+          hour: { unit: "hour" as const, agg: 1, limit: 200, empty: true },
+        }[field];
+        if (!map) return;
+        const candles = await tryOhlcv(pool, map.unit, map.agg, map.limit, {
+          includeEmpty: map.empty,
         });
-        if (candles.length) pack[load.field] = candles;
+        if (candles.length) pack[field] = candles;
       } catch {
-        if (Date.now() < geckoCooldownUntil) break;
+        // leave empty; caller may fall back
       }
-    }
+    };
 
-    if (Date.now() >= geckoCooldownUntil) {
-      try {
-        const days = await fetchDayHistory(pool);
-        if (days.length) pack.day = days;
-      } catch {
-        // keep prior day series
-      }
-    }
+    // Fast path: only what this window needs, then return.
+    await loadField(preferField);
+    if (preferField === "hour" && pack.hour.length < 2) await loadField("mid");
+    if (preferField === "mid" && pack.mid.length < 2) await loadField("hour");
+    if (preferField === "day" && pack.day.length < 2) await loadField("hour");
 
     pack.at = Date.now();
     seriesPackCache.set(key, pack);
+
+    // Warm remaining series in the background (don't block the chart).
+    void (async () => {
+      for (const field of ["hour", "mid", "day", "fine"] as const) {
+        if (field === preferField) continue;
+        await loadField(field);
+        pack.at = Date.now();
+        seriesPackCache.set(key, { ...pack });
+      }
+    })();
+
     return pack;
   })().finally(() => {
     seriesPackInflight.delete(key);
@@ -494,10 +508,10 @@ export async function getOhlcv(pairAddress: string | null | undefined): Promise<
   if (hit && Date.now() - hit.at < BUYCARD_CACHE_MS) return hit.candles;
 
   try {
-    const pack = await loadSeriesPack(pairAddress);
+    const pack = await loadSeriesPack(pairAddress, "1d");
     const candles =
-      pack.mid.length >= 8 ? pack.mid.slice(-64) : pack.fine.length >= 8 ? pack.fine.slice(-72) : pack.hour.slice(-48);
-    ohlcvCache.set(key, { at: Date.now(), candles, label: pack.mid.length ? "15m" : "5m" });
+      pack.mid.length >= 8 ? pack.mid.slice(-64) : pack.hour.length >= 8 ? pack.hour.slice(-48) : pack.fine.slice(-72);
+    ohlcvCache.set(key, { at: Date.now(), candles, label: pack.mid.length ? "15m" : "1h" });
     return candles;
   } catch {
     ohlcvCache.set(key, { at: Date.now(), candles: [], label: "15m" });
@@ -510,10 +524,10 @@ export async function getOhlcvForWindow(
   window: ChartWindow = DEFAULT_CHART_WINDOW,
 ): Promise<OhlcvResult> {
   if (!pairAddress || !isHexPool(pairAddress)) {
-    return { candles: [], intervalLabel: "15m", window };
+    return { candles: [], intervalLabel: "1h", window };
   }
 
-  const pack = await loadSeriesPack(pairAddress);
+  const pack = await loadSeriesPack(pairAddress, window);
   const picked = pickSeriesForWindow(pack, window);
   return { ...picked, window };
 }
