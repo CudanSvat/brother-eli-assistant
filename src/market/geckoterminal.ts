@@ -244,10 +244,32 @@ export interface OhlcvResult {
   window: ChartWindow;
 }
 
-/** Buy-card chart: short recent window (legacy default). */
+/** Buy-card chart: short recent traded window (15m / 5m). */
 export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
-  const result = await getOhlcvForWindow(pairAddress, "7d");
-  return result.candles;
+  if (!pairAddress || !isHexPool(pairAddress)) return [];
+  const key = `${pairAddress.toLowerCase()}:buycard`;
+  const hit = ohlcvCache.get(key);
+  if (hit && Date.now() - hit.at < 15_000) return hit.candles;
+
+  const plans: FetchPlan[] = [
+    { unit: "minute", aggregate: 15, limit: 64, label: "15m" },
+    { unit: "minute", aggregate: 5, limit: 72, label: "5m" },
+  ];
+  for (const network of [NETWORK, "starknet"]) {
+    for (const plan of plans) {
+      try {
+        const candles = await tryOhlcv(network, pairAddress, plan.unit, plan.aggregate, plan.limit);
+        if (candles.length >= 8) {
+          ohlcvCache.set(key, { at: Date.now(), candles, label: plan.label });
+          return candles;
+        }
+      } catch {
+        // try next
+      }
+    }
+  }
+  ohlcvCache.set(key, { at: Date.now(), candles: [], label: "15m" });
+  return [];
 }
 
 export async function getOhlcvForWindow(
