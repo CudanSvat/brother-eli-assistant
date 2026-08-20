@@ -184,8 +184,19 @@ interface SeriesPack {
 
 const seriesPackCache = new Map<string, SeriesPack>();
 const seriesPackInflight = new Map<string, Promise<SeriesPack>>();
-const MIN_SHORT_BARS = 16;
-const TARGET_RECENT_BARS = 64;
+
+/** Preferred candle size per UI window (always pad empty slots to fill the axis). */
+const WINDOW_PLAN: Record<
+  ChartWindow,
+  { field: keyof Omit<SeriesPack, "at">; label: string; intervalSec: number }
+> = {
+  "6h": { field: "fine", label: "5m", intervalSec: 5 * 60 },
+  "1d": { field: "mid", label: "15m", intervalSec: 15 * 60 },
+  "3d": { field: "hour", label: "1h", intervalSec: 60 * 60 },
+  "7d": { field: "hour", label: "1h", intervalSec: 60 * 60 },
+  "1m": { field: "day", label: "1d", intervalSec: 24 * 60 * 60 },
+  all: { field: "day", label: "1d", intervalSec: 24 * 60 * 60 },
+};
 
 export function isChartWindow(value: string): value is ChartWindow {
   return (CHART_WINDOWS as string[]).includes(value);
@@ -207,40 +218,71 @@ function filterByWindow(candles: Candle[], window: ChartWindow): Candle[] {
   return candles.filter((c) => candleSec(c) >= cutoffSec);
 }
 
-function inferIntervalSec(candles: Candle[], fallbackSec: number): number {
-  if (candles.length < 2) return fallbackSec;
-  const dts: number[] = [];
-  for (let i = 1; i < candles.length; i++) {
-    const dt = candleSec(candles[i]!) - candleSec(candles[i - 1]!);
-    if (dt > 0) dts.push(dt);
+function seedClose(candles: Candle[], beforeSec: number): number | null {
+  let seed: number | null = null;
+  for (const c of candles) {
+    if (candleSec(c) <= beforeSec) seed = c.close;
+    else break;
   }
-  if (!dts.length) return fallbackSec;
-  dts.sort((a, b) => a - b);
-  return dts[Math.floor(dts.length / 2)]! || fallbackSec;
+  if (seed != null) return seed;
+  return candles[0] ? candles[0].open : null;
 }
 
-/** Insert flat zero-volume candles so the X-axis covers the full wall-clock window. */
+/**
+ * Fill every bucket from start→end with flat zero-volume candles when nothing traded.
+ * Used for every timeframe so sparse markets still fill the plot width.
+ */
 function padEmptyBuckets(
-  candles: Candle[],
+  traded: Candle[],
+  allSeries: Candle[],
   intervalSec: number,
   window: ChartWindow,
 ): Candle[] {
-  if (!candles.length || !Number.isFinite(WINDOW_MS[window]) || intervalSec <= 0) return candles;
+  if (intervalSec <= 0) return traded;
   const nowSec = Math.floor(Date.now() / 1000);
-  const startSec = Math.floor((nowSec - WINDOW_MS[window] / 1000) / intervalSec) * intervalSec;
   const endSec = Math.floor(nowSec / intervalSec) * intervalSec;
+
+  let startSec: number;
+  if (window === "all") {
+    const first = allSeries[0] ?? traded[0];
+    if (!first) return traded;
+    startSec = Math.floor(candleSec(first) / intervalSec) * intervalSec;
+  } else {
+    startSec = Math.floor((nowSec - WINDOW_MS[window] / 1000) / intervalSec) * intervalSec;
+  }
+
   const byBucket = new Map<number, Candle>();
-  for (const c of candles) {
+  for (const c of traded) {
     const bucket = Math.floor(candleSec(c) / intervalSec) * intervalSec;
     byBucket.set(bucket, { ...c, time: bucket });
   }
 
+  let prevClose = seedClose(allSeries.length ? allSeries : traded, startSec);
+  if (prevClose == null && traded[0]) prevClose = traded[0].open;
+  if (prevClose == null) return traded;
+
   const filled: Candle[] = [];
-  let prevClose = candles[0]!.open;
-  for (let t = startSec; t <= endSec; t += intervalSec) {
-    const hit = byBucket.get(t);
+  const maxBars = 800;
+  const total = Math.floor((endSec - startSec) / intervalSec) + 1;
+  const step = total > maxBars ? Math.ceil(total / maxBars) : 1;
+  const stepSec = intervalSec * step;
+
+  for (let t = startSec; t <= endSec; t += stepSec) {
+    // Prefer a real trade inside this stepped bucket if present.
+    let hit: Candle | undefined;
+    for (let u = t; u < t + stepSec && u <= endSec; u += intervalSec) {
+      const c = byBucket.get(u);
+      if (c) hit = c;
+    }
     if (hit) {
-      filled.push(hit);
+      filled.push({
+        ...hit,
+        time: t,
+        open: hit.open,
+        high: hit.high,
+        low: hit.low,
+        close: hit.close,
+      });
       prevClose = hit.close;
     } else {
       filled.push({
@@ -254,15 +296,6 @@ function padEmptyBuckets(
     }
   }
   return filled;
-}
-
-function labelIntervalSec(sec: number): string {
-  if (sec <= 60) return "1m";
-  if (sec <= 5 * 60) return "5m";
-  if (sec <= 15 * 60) return "15m";
-  if (sec <= 60 * 60) return "1h";
-  if (sec <= 4 * 60 * 60) return "4h";
-  return "1d";
 }
 
 function parseOhlcvStatus(error: unknown): number | null {
@@ -332,7 +365,8 @@ async function loadSeriesPack(pool: string): Promise<SeriesPack> {
       { field: "fine", unit: "minute", agg: 5, limit: 90 },
       { field: "mid", unit: "minute", agg: 15, limit: 120 },
       { field: "hour", unit: "hour", agg: 1, limit: 200 },
-      { field: "day", unit: "day", agg: 1, limit: 400 },
+      // Gecko max is typically 1000 — enough for full history on thin pools.
+      { field: "day", unit: "day", agg: 1, limit: 1000 },
     ];
 
     for (const load of loads) {
@@ -341,7 +375,6 @@ async function loadSeriesPack(pool: string): Promise<SeriesPack> {
         const candles = await tryOhlcv(pool, load.unit, load.agg, load.limit);
         if (candles.length) pack[load.field] = candles;
       } catch {
-        // keep prior / empty; continue only if not cooling down hard
         if (Date.now() < geckoCooldownUntil) break;
       }
     }
@@ -361,86 +394,27 @@ function pickSeriesForWindow(
   pack: SeriesPack,
   window: ChartWindow,
 ): { candles: Candle[]; intervalLabel: string } {
-  const candidates: Array<{ candles: Candle[]; label: string; intervalSec: number }> = [];
-  if (window === "6h") {
-    candidates.push(
-      { candles: pack.fine, label: "5m", intervalSec: 5 * 60 },
-      { candles: pack.mid, label: "15m", intervalSec: 15 * 60 },
-    );
-  } else if (window === "1d") {
-    candidates.push(
-      { candles: pack.fine, label: "5m", intervalSec: 5 * 60 },
-      { candles: pack.mid, label: "15m", intervalSec: 15 * 60 },
-      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
-    );
-  } else if (window === "3d" || window === "7d") {
-    candidates.push(
-      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
-      { candles: pack.mid, label: "15m", intervalSec: 15 * 60 },
-      { candles: pack.day, label: "1d", intervalSec: 24 * 60 * 60 },
-    );
-  } else if (window === "1m") {
-    candidates.push(
-      { candles: pack.day, label: "1d", intervalSec: 24 * 60 * 60 },
-      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
-    );
-  } else {
-    candidates.push(
-      { candles: pack.day, label: "1d", intervalSec: 24 * 60 * 60 },
-      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
-    );
-  }
+  const plan = WINDOW_PLAN[window];
+  const fallbacks: Array<{ field: keyof Omit<SeriesPack, "at">; label: string; intervalSec: number }> = [
+    plan,
+    { field: "hour", label: "1h", intervalSec: 60 * 60 },
+    { field: "mid", label: "15m", intervalSec: 15 * 60 },
+    { field: "fine", label: "5m", intervalSec: 5 * 60 },
+    { field: "day", label: "1d", intervalSec: 24 * 60 * 60 },
+  ];
 
-  const short = window === "6h" || window === "1d";
-  let best: { candles: Candle[]; label: string; real: number } | null = null;
-
-  for (const c of candidates) {
-    let sliced = filterByWindow(c.candles, window);
-    if (sliced.length < 1 && c.candles.length) continue;
-
-    if (short && sliced.length) {
-      const interval = inferIntervalSec(c.candles, c.intervalSec);
-      sliced = padEmptyBuckets(sliced, interval, window);
-    }
-
-    const real = sliced.filter((x) => (x.volume || 0) > 0 || x.high !== x.low).length;
-    if (!best || real > best.real || (real === best.real && sliced.length > best.candles.length)) {
-      best = { candles: sliced, label: c.label, real };
-    }
-    if (real >= MIN_SHORT_BARS && sliced.length >= 24) {
-      return { candles: sliced, intervalLabel: c.label };
+  for (const choice of fallbacks) {
+    const series = pack[choice.field];
+    if (!series.length) continue;
+    const traded = filterByWindow(series, window);
+    const source = traded.length ? traded : series.slice(-1);
+    const padded = padEmptyBuckets(source, series, choice.intervalSec, window);
+    if (padded.length >= 2) {
+      return { candles: padded, intervalLabel: choice.label };
     }
   }
 
-  // Thin market: wall-clock window is empty — show last N traded bars instead.
-  if (short && (!best || best.real < MIN_SHORT_BARS)) {
-    for (const c of candidates) {
-      if (c.candles.length < 2) continue;
-      const recent = c.candles.slice(-TARGET_RECENT_BARS);
-      if (recent.length >= 2) {
-        return {
-          candles: recent,
-          intervalLabel: `${c.label} · recent`,
-        };
-      }
-    }
-  }
-
-  if (best && best.candles.length >= 2) {
-    return { candles: best.candles, intervalLabel: best.label };
-  }
-
-  // Last resort: any densest series we have.
-  const fallback =
-    pack.fine.length >= 2
-      ? pack.fine.slice(-TARGET_RECENT_BARS)
-      : pack.mid.length >= 2
-        ? pack.mid.slice(-TARGET_RECENT_BARS)
-        : pack.hour.slice(-TARGET_RECENT_BARS);
-  return {
-    candles: fallback,
-    intervalLabel: fallback.length ? `${labelIntervalSec(inferIntervalSec(fallback, 900))} · recent` : "15m",
-  };
+  return { candles: [], intervalLabel: plan.label };
 }
 
 export interface OhlcvResult {
