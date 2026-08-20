@@ -55,7 +55,12 @@ async function buildChart(
   token: TokenSettings,
   window: ChartWindow,
 ): Promise<{ png: Buffer; caption: string } | null> {
-  const market = await getMarketSnapshot(token.address);
+  let market = null as Awaited<ReturnType<typeof getMarketSnapshot>>;
+  try {
+    market = await getMarketSnapshot(token.address);
+  } catch {
+    market = null;
+  }
   const pair = market?.pairAddress ?? token.pairAddress;
   if (!pair) return null;
 
@@ -69,9 +74,10 @@ async function buildChart(
   });
   if (!png) return null;
 
+  const price = market?.priceUsd ?? token.lastPriceUsd;
   const caption = [
     `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${intervalLabel}`,
-    `Price: ${formatTokenPrice(market?.priceUsd)}`,
+    `Price: ${formatTokenPrice(price)}`,
   ].join("\n");
   return { png, caption };
 }

@@ -4,9 +4,10 @@ import { getMarketForToken as getDexMarket } from "./dexscreener.ts";
 import type { Candle, MarketSnapshot } from "../types.ts";
 
 const NETWORK = "starknet-alpha";
-const CACHE_MS = 8_000;
+const CACHE_MS = 60_000;
 const marketCache = new Map<string, { at: number; value: MarketSnapshot | null }>();
 const ohlcvCache = new Map<string, { at: number; candles: Candle[]; label: string }>();
+let geckoCooldownUntil = 0;
 
 interface GeckoTokenResponse {
   data?: {
@@ -94,15 +95,24 @@ export async function getGeckoMarket(tokenAddress: string): Promise<MarketSnapsh
   const token = normalizeAddress(tokenAddress);
   const hit = marketCache.get(token);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  // Prefer a slightly stale snapshot over hammering Gecko while rate-limited.
+  if (Date.now() < geckoCooldownUntil && hit) return hit.value;
 
   try {
     const snapshot = await fetchGeckoMarket(token);
     marketCache.set(token, { at: Date.now(), value: snapshot });
     return snapshot;
   } catch (error) {
-    console.warn("GeckoTerminal lookup failed:", error);
-    marketCache.set(token, { at: Date.now(), value: null });
-    return null;
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/\b429\b/.test(msg)) {
+      geckoCooldownUntil = Date.now() + 20_000;
+      console.warn("Gecko market rate-limited; cooling down 20s");
+      if (hit) return hit.value;
+    } else {
+      console.warn("GeckoTerminal lookup failed:", error);
+    }
+    marketCache.set(token, { at: Date.now(), value: hit?.value ?? null });
+    return hit?.value ?? null;
   }
 }
 
@@ -174,7 +184,8 @@ interface SeriesPack {
 
 const seriesPackCache = new Map<string, SeriesPack>();
 const seriesPackInflight = new Map<string, Promise<SeriesPack>>();
-let geckoCooldownUntil = 0;
+const MIN_SHORT_BARS = 16;
+const TARGET_RECENT_BARS = 64;
 
 export function isChartWindow(value: string): value is ChartWindow {
   return (CHART_WINDOWS as string[]).includes(value);
@@ -194,6 +205,64 @@ function filterByWindow(candles: Candle[], window: ChartWindow): Candle[] {
   if (window === "all" || !Number.isFinite(WINDOW_MS[window])) return candles;
   const cutoffSec = Math.floor((Date.now() - WINDOW_MS[window]) / 1000);
   return candles.filter((c) => candleSec(c) >= cutoffSec);
+}
+
+function inferIntervalSec(candles: Candle[], fallbackSec: number): number {
+  if (candles.length < 2) return fallbackSec;
+  const dts: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const dt = candleSec(candles[i]!) - candleSec(candles[i - 1]!);
+    if (dt > 0) dts.push(dt);
+  }
+  if (!dts.length) return fallbackSec;
+  dts.sort((a, b) => a - b);
+  return dts[Math.floor(dts.length / 2)]! || fallbackSec;
+}
+
+/** Insert flat zero-volume candles so the X-axis covers the full wall-clock window. */
+function padEmptyBuckets(
+  candles: Candle[],
+  intervalSec: number,
+  window: ChartWindow,
+): Candle[] {
+  if (!candles.length || !Number.isFinite(WINDOW_MS[window]) || intervalSec <= 0) return candles;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const startSec = Math.floor((nowSec - WINDOW_MS[window] / 1000) / intervalSec) * intervalSec;
+  const endSec = Math.floor(nowSec / intervalSec) * intervalSec;
+  const byBucket = new Map<number, Candle>();
+  for (const c of candles) {
+    const bucket = Math.floor(candleSec(c) / intervalSec) * intervalSec;
+    byBucket.set(bucket, { ...c, time: bucket });
+  }
+
+  const filled: Candle[] = [];
+  let prevClose = candles[0]!.open;
+  for (let t = startSec; t <= endSec; t += intervalSec) {
+    const hit = byBucket.get(t);
+    if (hit) {
+      filled.push(hit);
+      prevClose = hit.close;
+    } else {
+      filled.push({
+        time: t,
+        open: prevClose,
+        high: prevClose,
+        low: prevClose,
+        close: prevClose,
+        volume: 0,
+      });
+    }
+  }
+  return filled;
+}
+
+function labelIntervalSec(sec: number): string {
+  if (sec <= 60) return "1m";
+  if (sec <= 5 * 60) return "5m";
+  if (sec <= 15 * 60) return "15m";
+  if (sec <= 60 * 60) return "1h";
+  if (sec <= 4 * 60 * 60) return "4h";
+  return "1d";
 }
 
 function parseOhlcvStatus(error: unknown): number | null {
@@ -292,31 +361,86 @@ function pickSeriesForWindow(
   pack: SeriesPack,
   window: ChartWindow,
 ): { candles: Candle[]; intervalLabel: string } {
-  const candidates: Array<{ candles: Candle[]; label: string }> = [];
+  const candidates: Array<{ candles: Candle[]; label: string; intervalSec: number }> = [];
   if (window === "6h") {
-    candidates.push({ candles: pack.fine, label: "5m" }, { candles: pack.mid, label: "15m" });
+    candidates.push(
+      { candles: pack.fine, label: "5m", intervalSec: 5 * 60 },
+      { candles: pack.mid, label: "15m", intervalSec: 15 * 60 },
+    );
   } else if (window === "1d") {
-    candidates.push({ candles: pack.mid, label: "15m" }, { candles: pack.fine, label: "5m" }, { candles: pack.hour, label: "1h" });
+    candidates.push(
+      { candles: pack.fine, label: "5m", intervalSec: 5 * 60 },
+      { candles: pack.mid, label: "15m", intervalSec: 15 * 60 },
+      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
+    );
   } else if (window === "3d" || window === "7d") {
-    candidates.push({ candles: pack.hour, label: "1h" }, { candles: pack.mid, label: "15m" }, { candles: pack.day, label: "1d" });
+    candidates.push(
+      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
+      { candles: pack.mid, label: "15m", intervalSec: 15 * 60 },
+      { candles: pack.day, label: "1d", intervalSec: 24 * 60 * 60 },
+    );
   } else if (window === "1m") {
-    candidates.push({ candles: pack.day, label: "1d" }, { candles: pack.hour, label: "1h" });
+    candidates.push(
+      { candles: pack.day, label: "1d", intervalSec: 24 * 60 * 60 },
+      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
+    );
   } else {
-    candidates.push({ candles: pack.day, label: "1d" }, { candles: pack.hour, label: "1h" });
+    candidates.push(
+      { candles: pack.day, label: "1d", intervalSec: 24 * 60 * 60 },
+      { candles: pack.hour, label: "1h", intervalSec: 60 * 60 },
+    );
   }
 
-  let best: { candles: Candle[]; label: string } | null = null;
+  const short = window === "6h" || window === "1d";
+  let best: { candles: Candle[]; label: string; real: number } | null = null;
+
   for (const c of candidates) {
-    const sliced = filterByWindow(c.candles, window);
-    if (sliced.length < 2) continue;
-    if (!best || sliced.length > best.candles.length) {
-      best = { candles: sliced, label: c.label };
+    let sliced = filterByWindow(c.candles, window);
+    if (sliced.length < 1 && c.candles.length) continue;
+
+    if (short && sliced.length) {
+      const interval = inferIntervalSec(c.candles, c.intervalSec);
+      sliced = padEmptyBuckets(sliced, interval, window);
     }
-    if (sliced.length >= 24) return { candles: sliced, intervalLabel: c.label };
+
+    const real = sliced.filter((x) => (x.volume || 0) > 0 || x.high !== x.low).length;
+    if (!best || real > best.real || (real === best.real && sliced.length > best.candles.length)) {
+      best = { candles: sliced, label: c.label, real };
+    }
+    if (real >= MIN_SHORT_BARS && sliced.length >= 24) {
+      return { candles: sliced, intervalLabel: c.label };
+    }
   }
-  return best
-    ? { candles: best.candles, intervalLabel: best.label }
-    : { candles: [], intervalLabel: candidates[0]?.label ?? "15m" };
+
+  // Thin market: wall-clock window is empty — show last N traded bars instead.
+  if (short && (!best || best.real < MIN_SHORT_BARS)) {
+    for (const c of candidates) {
+      if (c.candles.length < 2) continue;
+      const recent = c.candles.slice(-TARGET_RECENT_BARS);
+      if (recent.length >= 2) {
+        return {
+          candles: recent,
+          intervalLabel: `${c.label} · recent`,
+        };
+      }
+    }
+  }
+
+  if (best && best.candles.length >= 2) {
+    return { candles: best.candles, intervalLabel: best.label };
+  }
+
+  // Last resort: any densest series we have.
+  const fallback =
+    pack.fine.length >= 2
+      ? pack.fine.slice(-TARGET_RECENT_BARS)
+      : pack.mid.length >= 2
+        ? pack.mid.slice(-TARGET_RECENT_BARS)
+        : pack.hour.slice(-TARGET_RECENT_BARS);
+  return {
+    candles: fallback,
+    intervalLabel: fallback.length ? `${labelIntervalSec(inferIntervalSec(fallback, 900))} · recent` : "15m",
+  };
 }
 
 export interface OhlcvResult {
