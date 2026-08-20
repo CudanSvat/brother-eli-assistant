@@ -81,6 +81,17 @@ You want it to say privacy is **disabled**. Then add the bot to the group.
 
 Cap: **10 tokens per group**.
 
+### On-demand chart
+
+Anyone in the group (or a connected DM) can send:
+
+```
+/chart
+/chart SLAY
+```
+
+Default window is **1d**. Buttons on the same message switch **6h · 1d · 3d · 7d · 1M · All** (edits the photo, no new message).
+
 Close the panel with **Close**, **Cancel**, `/cancel`, or `/close`. That also drops any in-progress prompt (GIF, min USD, etc.) so later chat messages are not captured.
 
 ## How detection works

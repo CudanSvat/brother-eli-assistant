@@ -6,7 +6,7 @@ import type { Candle, MarketSnapshot } from "../types.ts";
 const NETWORK = "starknet-alpha";
 const CACHE_MS = 8_000;
 const marketCache = new Map<string, { at: number; value: MarketSnapshot | null }>();
-const ohlcvCache = new Map<string, { at: number; candles: Candle[] }>();
+const ohlcvCache = new Map<string, { at: number; candles: Candle[]; label: string }>();
 
 interface GeckoTokenResponse {
   data?: {
@@ -144,10 +144,77 @@ export async function getQuotePriceUsd(quoteAddress: string): Promise<number | n
   return dex?.priceUsd && dex.priceUsd > 0 ? dex.priceUsd : null;
 }
 
-async function tryOhlcv(network: string, pool: string, aggregate: number, limit: number): Promise<Candle[]> {
+export type ChartWindow = "6h" | "1d" | "3d" | "7d" | "1m" | "all";
+
+export const CHART_WINDOWS: ChartWindow[] = ["6h", "1d", "3d", "7d", "1m", "all"];
+export const DEFAULT_CHART_WINDOW: ChartWindow = "1d";
+
+const WINDOW_MS: Record<ChartWindow, number> = {
+  "6h": 6 * 3_600_000,
+  "1d": 24 * 3_600_000,
+  "3d": 3 * 24 * 3_600_000,
+  "7d": 7 * 24 * 3_600_000,
+  "1m": 30 * 24 * 3_600_000,
+  all: Number.POSITIVE_INFINITY,
+};
+
+type OhlcvUnit = "minute" | "hour" | "day";
+
+interface FetchPlan {
+  unit: OhlcvUnit;
+  aggregate: number;
+  limit: number;
+  label: string;
+}
+
+/** Gecko fetch plans per UI window (best → fallback). */
+const WINDOW_PLANS: Record<ChartWindow, FetchPlan[]> = {
+  "6h": [
+    { unit: "minute", aggregate: 5, limit: 100, label: "5m" },
+    { unit: "minute", aggregate: 15, limit: 40, label: "15m" },
+  ],
+  "1d": [
+    { unit: "minute", aggregate: 15, limit: 120, label: "15m" },
+    { unit: "minute", aggregate: 5, limit: 300, label: "5m" },
+  ],
+  "3d": [
+    { unit: "minute", aggregate: 15, limit: 300, label: "15m" },
+    { unit: "hour", aggregate: 1, limit: 80, label: "1h" },
+  ],
+  "7d": [
+    { unit: "hour", aggregate: 1, limit: 180, label: "1h" },
+    { unit: "minute", aggregate: 15, limit: 700, label: "15m" },
+  ],
+  "1m": [
+    { unit: "hour", aggregate: 4, limit: 200, label: "4h" },
+    { unit: "day", aggregate: 1, limit: 40, label: "1d" },
+  ],
+  all: [
+    { unit: "day", aggregate: 1, limit: 365, label: "1d" },
+    { unit: "hour", aggregate: 4, limit: 500, label: "4h" },
+  ],
+};
+
+export function isChartWindow(value: string): value is ChartWindow {
+  return (CHART_WINDOWS as string[]).includes(value);
+}
+
+export function chartWindowLabel(window: ChartWindow): string {
+  if (window === "1m") return "1M";
+  if (window === "all") return "All";
+  return window;
+}
+
+async function tryOhlcv(
+  network: string,
+  pool: string,
+  unit: OhlcvUnit,
+  aggregate: number,
+  limit: number,
+): Promise<Candle[]> {
   const url =
     `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${pool}` +
-    `/ohlcv/minute?aggregate=${aggregate}&limit=${limit}&currency=usd`;
+    `/ohlcv/${unit}?aggregate=${aggregate}&limit=${limit}&currency=usd`;
   const body = await fetchJson<OhlcvResponse>(url);
   const list = body.data?.attributes?.ohlcv_list ?? [];
   return list
@@ -162,28 +229,57 @@ async function tryOhlcv(network: string, pool: string, aggregate: number, limit:
     .sort((a, b) => a.time - b.time);
 }
 
-export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
-  if (!pairAddress || !isHexPool(pairAddress)) return [];
-  const key = pairAddress.toLowerCase();
-  const hit = ohlcvCache.get(key);
-  if (hit && Date.now() - hit.at < 15_000) return hit.candles;
+function filterByWindow(candles: Candle[], window: ChartWindow): Candle[] {
+  if (window === "all" || !Number.isFinite(WINDOW_MS[window])) return candles;
+  const cutoffSec = Math.floor((Date.now() - WINDOW_MS[window]) / 1000);
+  return candles.filter((c) => {
+    const t = c.time < 1e12 ? c.time : Math.floor(c.time / 1000);
+    return t >= cutoffSec;
+  });
+}
 
+export interface OhlcvResult {
+  candles: Candle[];
+  intervalLabel: string;
+  window: ChartWindow;
+}
+
+/** Buy-card chart: short recent window (legacy default). */
+export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
+  const result = await getOhlcvForWindow(pairAddress, "7d");
+  return result.candles;
+}
+
+export async function getOhlcvForWindow(
+  pairAddress: string | null | undefined,
+  window: ChartWindow = DEFAULT_CHART_WINDOW,
+): Promise<OhlcvResult> {
+  if (!pairAddress || !isHexPool(pairAddress)) {
+    return { candles: [], intervalLabel: "15m", window };
+  }
+
+  const key = `${pairAddress.toLowerCase()}:${window}`;
+  const hit = ohlcvCache.get(key);
+  if (hit && Date.now() - hit.at < 15_000) {
+    return { candles: hit.candles, intervalLabel: hit.label, window };
+  }
+
+  const plans = WINDOW_PLANS[window];
   for (const network of [NETWORK, "starknet"]) {
-    for (const [aggregate, limit] of [
-      [15, 64],
-      [5, 72],
-    ] as const) {
+    for (const plan of plans) {
       try {
-        const candles = await tryOhlcv(network, pairAddress, aggregate, limit);
-        if (candles.length >= 8) {
-          ohlcvCache.set(key, { at: Date.now(), candles });
-          return candles;
+        const raw = await tryOhlcv(network, pairAddress, plan.unit, plan.aggregate, plan.limit);
+        const candles = filterByWindow(raw, window);
+        if (candles.length >= 3) {
+          ohlcvCache.set(key, { at: Date.now(), candles, label: plan.label });
+          return { candles, intervalLabel: plan.label, window };
         }
       } catch {
-        // try next timeframe / network
+        // try next plan / network
       }
     }
   }
-  ohlcvCache.set(key, { at: Date.now(), candles: [] });
-  return [];
+
+  ohlcvCache.set(key, { at: Date.now(), candles: [], label: plans[0]!.label });
+  return { candles: [], intervalLabel: plans[0]!.label, window };
 }
