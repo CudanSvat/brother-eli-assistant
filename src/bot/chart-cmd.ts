@@ -94,7 +94,7 @@ async function sendOrEditChart(
       // Keep the previous photo; only toast. Never leave the UI stuck.
       try {
         await ctx.answerCallbackQuery({
-          text: `No ${chartWindowLabel(window)} data yet — try another window`,
+          text: `No ${chartWindowLabel(window)} data yet — wait a few seconds`,
           show_alert: false,
         });
       } catch {

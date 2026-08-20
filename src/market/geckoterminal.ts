@@ -158,49 +158,23 @@ const WINDOW_MS: Record<ChartWindow, number> = {
   all: Number.POSITIVE_INFINITY,
 };
 
+/** How long a successful series pack stays warm (button switches hit cache). */
+const SERIES_CACHE_MS = 90_000;
+const BUYCARD_CACHE_MS = 20_000;
+
 type OhlcvUnit = "minute" | "hour" | "day";
 
-interface FetchPlan {
-  unit: OhlcvUnit;
-  aggregate: number;
-  limit: number;
-  label: string;
+interface SeriesPack {
+  at: number;
+  fine: Candle[]; // 5m
+  mid: Candle[]; // 15m
+  hour: Candle[]; // 1h
+  day: Candle[]; // 1d
 }
 
-/** Gecko fetch plans per UI window — candle size scales with range (~60–120 bars). */
-const WINDOW_PLANS: Record<ChartWindow, FetchPlan[]> = {
-  "6h": [
-    { unit: "minute", aggregate: 5, limit: 80, label: "5m" },
-    { unit: "minute", aggregate: 1, limit: 400, label: "1m" },
-    { unit: "minute", aggregate: 15, limit: 40, label: "15m" },
-  ],
-  "1d": [
-    { unit: "minute", aggregate: 15, limit: 120, label: "15m" },
-    { unit: "minute", aggregate: 5, limit: 300, label: "5m" },
-    { unit: "hour", aggregate: 1, limit: 30, label: "1h" },
-  ],
-  "3d": [
-    { unit: "hour", aggregate: 1, limit: 80, label: "1h" },
-    { unit: "minute", aggregate: 15, limit: 300, label: "15m" },
-    { unit: "hour", aggregate: 4, limit: 24, label: "4h" },
-  ],
-  "7d": [
-    { unit: "hour", aggregate: 1, limit: 200, label: "1h" },
-    { unit: "hour", aggregate: 4, limit: 50, label: "4h" },
-    { unit: "day", aggregate: 1, limit: 14, label: "1d" },
-    { unit: "minute", aggregate: 15, limit: 700, label: "15m" },
-  ],
-  "1m": [
-    { unit: "hour", aggregate: 4, limit: 200, label: "4h" },
-    { unit: "day", aggregate: 1, limit: 40, label: "1d" },
-    { unit: "hour", aggregate: 12, limit: 80, label: "12h" },
-  ],
-  all: [
-    { unit: "day", aggregate: 1, limit: 500, label: "1d" },
-    { unit: "hour", aggregate: 12, limit: 500, label: "12h" },
-    { unit: "hour", aggregate: 4, limit: 500, label: "4h" },
-  ],
-};
+const seriesPackCache = new Map<string, SeriesPack>();
+const seriesPackInflight = new Map<string, Promise<SeriesPack>>();
+let geckoCooldownUntil = 0;
 
 export function isChartWindow(value: string): value is ChartWindow {
   return (CHART_WINDOWS as string[]).includes(value);
@@ -212,37 +186,137 @@ export function chartWindowLabel(window: ChartWindow): string {
   return window;
 }
 
-async function tryOhlcv(
-  network: string,
-  pool: string,
-  unit: OhlcvUnit,
-  aggregate: number,
-  limit: number,
-): Promise<Candle[]> {
-  const url =
-    `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${pool}` +
-    `/ohlcv/${unit}?aggregate=${aggregate}&limit=${limit}&currency=usd`;
-  const body = await fetchJson<OhlcvResponse>(url);
-  const list = body.data?.attributes?.ohlcv_list ?? [];
-  return list
-    .map(([time, open, high, low, close, volume]) => ({
-      time,
-      open,
-      high,
-      low,
-      close,
-      volume,
-    }))
-    .sort((a, b) => a.time - b.time);
+function candleSec(c: Candle): number {
+  return c.time < 1e12 ? c.time : Math.floor(c.time / 1000);
 }
 
 function filterByWindow(candles: Candle[], window: ChartWindow): Candle[] {
   if (window === "all" || !Number.isFinite(WINDOW_MS[window])) return candles;
   const cutoffSec = Math.floor((Date.now() - WINDOW_MS[window]) / 1000);
-  return candles.filter((c) => {
-    const t = c.time < 1e12 ? c.time : Math.floor(c.time / 1000);
-    return t >= cutoffSec;
+  return candles.filter((c) => candleSec(c) >= cutoffSec);
+}
+
+function parseOhlcvStatus(error: unknown): number | null {
+  const msg = error instanceof Error ? error.message : String(error);
+  const m = msg.match(/^(\d{3})\b/);
+  return m ? Number(m[1]) : null;
+}
+
+async function tryOhlcv(
+  pool: string,
+  unit: OhlcvUnit,
+  aggregate: number,
+  limit: number,
+): Promise<Candle[]> {
+  if (Date.now() < geckoCooldownUntil) {
+    throw new Error(`429 Too Many Requests (cooldown ${Math.ceil((geckoCooldownUntil - Date.now()) / 1000)}s)`);
+  }
+
+  const url =
+    `https://api.geckoterminal.com/api/v2/networks/${NETWORK}/pools/${pool}` +
+    `/ohlcv/${unit}?aggregate=${aggregate}&limit=${limit}&currency=usd`;
+
+  try {
+    const body = await fetchJson<OhlcvResponse>(url);
+    const list = body.data?.attributes?.ohlcv_list ?? [];
+    return list
+      .map(([time, open, high, low, close, volume]) => ({
+        time,
+        open,
+        high,
+        low,
+        close,
+        volume,
+      }))
+      .sort((a, b) => a.time - b.time);
+  } catch (error) {
+    const status = parseOhlcvStatus(error);
+    if (status === 429) {
+      geckoCooldownUntil = Date.now() + 20_000;
+      console.warn(`Gecko OHLCV rate-limited; cooling down 20s`);
+    } else if (status !== 404) {
+      console.warn(`Gecko OHLCV ${unit}/${aggregate} failed:`, status ?? error);
+    }
+    throw error;
+  }
+}
+
+/** At most one request in flight per pool; max 4 Gecko calls on a cold load. */
+async function loadSeriesPack(pool: string): Promise<SeriesPack> {
+  const key = pool.toLowerCase();
+  const hit = seriesPackCache.get(key);
+  if (hit && Date.now() - hit.at < SERIES_CACHE_MS) return hit;
+
+  const inflight = seriesPackInflight.get(key);
+  if (inflight) return inflight;
+
+  const promise = (async (): Promise<SeriesPack> => {
+    const pack: SeriesPack = {
+      at: Date.now(),
+      fine: hit?.fine ?? [],
+      mid: hit?.mid ?? [],
+      hour: hit?.hour ?? [],
+      day: hit?.day ?? [],
+    };
+
+    const loads: Array<{ field: keyof Omit<SeriesPack, "at">; unit: OhlcvUnit; agg: number; limit: number }> = [
+      { field: "fine", unit: "minute", agg: 5, limit: 90 },
+      { field: "mid", unit: "minute", agg: 15, limit: 120 },
+      { field: "hour", unit: "hour", agg: 1, limit: 200 },
+      { field: "day", unit: "day", agg: 1, limit: 400 },
+    ];
+
+    for (const load of loads) {
+      if (Date.now() < geckoCooldownUntil) break;
+      try {
+        const candles = await tryOhlcv(pool, load.unit, load.agg, load.limit);
+        if (candles.length) pack[load.field] = candles;
+      } catch {
+        // keep prior / empty; continue only if not cooling down hard
+        if (Date.now() < geckoCooldownUntil) break;
+      }
+    }
+
+    pack.at = Date.now();
+    seriesPackCache.set(key, pack);
+    return pack;
+  })().finally(() => {
+    seriesPackInflight.delete(key);
   });
+
+  seriesPackInflight.set(key, promise);
+  return promise;
+}
+
+function pickSeriesForWindow(
+  pack: SeriesPack,
+  window: ChartWindow,
+): { candles: Candle[]; intervalLabel: string } {
+  const candidates: Array<{ candles: Candle[]; label: string }> = [];
+  if (window === "6h") {
+    candidates.push({ candles: pack.fine, label: "5m" }, { candles: pack.mid, label: "15m" });
+  } else if (window === "1d") {
+    candidates.push({ candles: pack.mid, label: "15m" }, { candles: pack.fine, label: "5m" }, { candles: pack.hour, label: "1h" });
+  } else if (window === "3d" || window === "7d") {
+    candidates.push({ candles: pack.hour, label: "1h" }, { candles: pack.mid, label: "15m" }, { candles: pack.day, label: "1d" });
+  } else if (window === "1m") {
+    candidates.push({ candles: pack.day, label: "1d" }, { candles: pack.hour, label: "1h" });
+  } else {
+    candidates.push({ candles: pack.day, label: "1d" }, { candles: pack.hour, label: "1h" });
+  }
+
+  let best: { candles: Candle[]; label: string } | null = null;
+  for (const c of candidates) {
+    const sliced = filterByWindow(c.candles, window);
+    if (sliced.length < 2) continue;
+    if (!best || sliced.length > best.candles.length) {
+      best = { candles: sliced, label: c.label };
+    }
+    if (sliced.length >= 24) return { candles: sliced, intervalLabel: c.label };
+  }
+  return best
+    ? { candles: best.candles, intervalLabel: best.label }
+    : { candles: [], intervalLabel: candidates[0]?.label ?? "15m" };
 }
 
 export interface OhlcvResult {
@@ -251,32 +325,23 @@ export interface OhlcvResult {
   window: ChartWindow;
 }
 
-/** Buy-card chart: short recent traded window (15m / 5m). */
+/** Buy-card chart: short recent traded window from the shared series pack. */
 export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
   if (!pairAddress || !isHexPool(pairAddress)) return [];
   const key = `${pairAddress.toLowerCase()}:buycard`;
   const hit = ohlcvCache.get(key);
-  if (hit && Date.now() - hit.at < 15_000) return hit.candles;
+  if (hit && Date.now() - hit.at < BUYCARD_CACHE_MS) return hit.candles;
 
-  const plans: FetchPlan[] = [
-    { unit: "minute", aggregate: 15, limit: 64, label: "15m" },
-    { unit: "minute", aggregate: 5, limit: 72, label: "5m" },
-  ];
-  for (const network of [NETWORK, "starknet"]) {
-    for (const plan of plans) {
-      try {
-        const candles = await tryOhlcv(network, pairAddress, plan.unit, plan.aggregate, plan.limit);
-        if (candles.length >= 8) {
-          ohlcvCache.set(key, { at: Date.now(), candles, label: plan.label });
-          return candles;
-        }
-      } catch {
-        // try next
-      }
-    }
+  try {
+    const pack = await loadSeriesPack(pairAddress);
+    const candles =
+      pack.mid.length >= 8 ? pack.mid.slice(-64) : pack.fine.length >= 8 ? pack.fine.slice(-72) : pack.hour.slice(-48);
+    ohlcvCache.set(key, { at: Date.now(), candles, label: pack.mid.length ? "15m" : "5m" });
+    return candles;
+  } catch {
+    ohlcvCache.set(key, { at: Date.now(), candles: [], label: "15m" });
+    return [];
   }
-  ohlcvCache.set(key, { at: Date.now(), candles: [], label: "15m" });
-  return [];
 }
 
 export async function getOhlcvForWindow(
@@ -287,42 +352,7 @@ export async function getOhlcvForWindow(
     return { candles: [], intervalLabel: "15m", window };
   }
 
-  const key = `${pairAddress.toLowerCase()}:${window}`;
-  const hit = ohlcvCache.get(key);
-  // Never serve a cached empty miss for long — that stuck the /chart buttons.
-  if (hit && Date.now() - hit.at < 15_000 && hit.candles.length > 0) {
-    return { candles: hit.candles, intervalLabel: hit.label, window };
-  }
-
-  const plans = WINDOW_PLANS[window];
-  let best: { candles: Candle[]; label: string } | null = null;
-
-  for (const network of [NETWORK, "starknet"]) {
-    for (const plan of plans) {
-      try {
-        const raw = await tryOhlcv(network, pairAddress, plan.unit, plan.aggregate, plan.limit);
-        const candles = filterByWindow(raw, window);
-        if (candles.length < 2) continue;
-        if (!best || candles.length > best.candles.length) {
-          best = { candles, label: plan.label };
-        }
-        // Prefer a plan that fills the window reasonably (~40+ bars).
-        if (candles.length >= 40) {
-          ohlcvCache.set(key, { at: Date.now(), candles, label: plan.label });
-          return { candles, intervalLabel: plan.label, window };
-        }
-      } catch (error) {
-        console.warn(`OHLCV ${window} ${plan.unit}/${plan.aggregate} failed:`, error);
-      }
-    }
-    if (best && best.candles.length >= 8) break;
-  }
-
-  if (best) {
-    ohlcvCache.set(key, { at: Date.now(), candles: best.candles, label: best.label });
-    return { candles: best.candles, intervalLabel: best.label, window };
-  }
-
-  // Do not cache empty misses — next tap should retry immediately.
-  return { candles: [], intervalLabel: plans[0]!.label, window };
+  const pack = await loadSeriesPack(pairAddress);
+  const picked = pickSeriesForWindow(pack, window);
+  return { ...picked, window };
 }
