@@ -87,12 +87,14 @@ export function decodeSwapped(event: {
 
   const delta0 = -reader.i129();
   const delta1 = -reader.i129();
+  const sqrtRatioAfter = reader.remaining() >= 2 ? reader.u256() : null;
 
   return {
     locker,
     poolKey,
     delta0,
     delta1,
+    sqrtRatioAfter,
     transactionHash: normalizeAddress(event.transaction_hash),
     blockNumber: event.block_number ?? event.blockNumber ?? 0,
   };

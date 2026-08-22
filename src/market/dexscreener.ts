@@ -46,6 +46,7 @@ function snapshotFromPair(best: DexPair, token: string): MarketSnapshot {
     pairAddress: best.pairAddress,
     pairUrl: best.url,
     quoteSymbol: tokenIsBase ? best.quoteToken.symbol : best.baseToken.symbol,
+    quotePriceUsd: null,
     dexId: best.dexId,
   };
 }

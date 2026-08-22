@@ -306,3 +306,11 @@ export function bumpAthForAddress(address: string, athPriceUsd: number): void {
     )
     .run({ address: normalizeAddress(address), ath: athPriceUsd });
 }
+
+/** Set ATH for a token in every group, including clamping a fake high back down. */
+export function setAthForAddress(address: string, athPriceUsd: number): void {
+  if (!Number.isFinite(athPriceUsd) || athPriceUsd <= 0) return;
+  openDb()
+    .prepare(`UPDATE tokens SET ath_price_usd = @ath WHERE address = @address`)
+    .run({ address: normalizeAddress(address), ath: athPriceUsd });
+}

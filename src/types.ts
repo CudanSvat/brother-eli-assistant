@@ -40,6 +40,7 @@ export interface DecodedSwap {
   poolKey: PoolKey;
   delta0: bigint;
   delta1: bigint;
+  sqrtRatioAfter: bigint | null;
   transactionHash: string;
   blockNumber: number;
 }
@@ -47,6 +48,12 @@ export interface DecodedSwap {
 export interface PaidLeg {
   address: string;
   amount: bigint;
+}
+
+export interface ChartSpot {
+  sqrtRatio: bigint;
+  token0: string;
+  token1: string;
 }
 
 export interface ClassifiedSwap {
@@ -60,6 +67,8 @@ export interface ClassifiedSwap {
   blockNumber: number;
   locker: string;
   hopCount: number;
+  /** Post-swap sqrt_ratio from the pinned chart pool hop, if this tx touched it. */
+  chartSpot: ChartSpot | null;
 }
 
 export interface MarketSnapshot {
@@ -73,6 +82,8 @@ export interface MarketSnapshot {
   pairAddress: string | null;
   pairUrl: string | null;
   quoteSymbol: string | null;
+  /** USD price of the chart pool's quote token (STRK for SLAY), from the same Gecko pool payload. */
+  quotePriceUsd: number | null;
   dexId: string | null;
 }
 

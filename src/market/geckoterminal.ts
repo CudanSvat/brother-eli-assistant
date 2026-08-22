@@ -1,11 +1,19 @@
-import { QUOTE_TOKENS, SLAY_CHART_POOL, SLAY_TOKEN, config } from "../config.ts";
-import { fetchJson, normalizeAddress, sleep } from "../lib/format.ts";
+import {
+  QUOTE_TOKENS,
+  SLAY_CHART_FEE,
+  SLAY_CHART_POOL,
+  SLAY_CHART_QUOTE,
+  SLAY_TOKEN,
+  config,
+} from "../config.ts";
+import { fetchJson, normalizeAddress, quoteMeta, sleep } from "../lib/format.ts";
 import { getMarketForToken as getDexMarket } from "./dexscreener.ts";
 import type { Candle, MarketSnapshot } from "../types.ts";
 
 const NETWORK = "starknet-alpha";
 const CACHE_MS = 60_000;
 const marketCache = new Map<string, { at: number; value: MarketSnapshot | null }>();
+const poolCache = new Map<string, { at: number; value: MarketSnapshot | null }>();
 const ohlcvCache = new Map<string, { at: number; candles: Candle[]; label: string }>();
 let geckoCooldownUntil = 0;
 
@@ -50,6 +58,20 @@ interface GeckoPoolIncluded {
     reserve_in_usd?: string;
     volume_usd?: { h24?: string };
     price_change_percentage?: { h1?: string; h24?: string };
+  };
+}
+
+interface GeckoPoolResponse {
+  data?: {
+    attributes?: {
+      base_token_price_usd?: string | null;
+      quote_token_price_usd?: string | null;
+      reserve_in_usd?: string;
+      volume_usd?: { h24?: string };
+      fdv_usd?: string | null;
+      market_cap_usd?: string | null;
+      price_change_percentage?: { h1?: string; h24?: string };
+    };
   };
 }
 
@@ -117,6 +139,24 @@ export function chartPoolForToken(tokenAddress: string): string | null {
   return null;
 }
 
+/** Quote token of the pinned chart pool (STRK for SLAY). */
+export function chartQuoteForToken(tokenAddress: string): string | null {
+  const token = normalizeAddress(tokenAddress);
+  if (token === normalizeAddress(SLAY_TOKEN)) {
+    return normalizeAddress(SLAY_CHART_QUOTE);
+  }
+  return null;
+}
+
+/** Ekubo fee of the pinned chart pool, or null when any fee is fine. */
+export function chartFeeForToken(tokenAddress: string): bigint | null {
+  const token = normalizeAddress(tokenAddress);
+  if (token === normalizeAddress(SLAY_TOKEN)) {
+    return SLAY_CHART_FEE;
+  }
+  return null;
+}
+
 export function resolveChartPair(tokenAddress: string, fallback?: string | null): string | null {
   const override = chartPoolForToken(tokenAddress);
   if (override) return override;
@@ -130,25 +170,89 @@ export function geckoChartUrlForToken(tokenAddress: string, market?: MarketSnaps
   return geckoTokenUrl(tokenAddress);
 }
 
-function applyChartPoolOverride(tokenAddress: string, market: MarketSnapshot | null): MarketSnapshot | null {
+function applyChartPoolOverride(
+  tokenAddress: string,
+  market: MarketSnapshot | null,
+  poolSnap: MarketSnapshot | null,
+): MarketSnapshot | null {
   const pool = chartPoolForToken(tokenAddress);
   if (!pool) return market;
-  if (!market) {
-    return {
-      priceUsd: null,
-      priceNative: null,
-      marketCap: null,
-      liquidityUsd: null,
-      volume24h: null,
-      change1h: null,
-      change24h: null,
-      pairAddress: pool,
-      pairUrl: geckoPoolUrl(pool),
-      quoteSymbol: null,
-      dexId: null,
-    };
+  const quote = chartQuoteForToken(tokenAddress);
+  const quoteSymbol = quote ? quoteMeta(quote).symbol : (poolSnap?.quoteSymbol ?? market?.quoteSymbol ?? null);
+  const base = market ?? {
+    priceUsd: null,
+    priceNative: null,
+    marketCap: null,
+    liquidityUsd: null,
+    volume24h: null,
+    change1h: null,
+    change24h: null,
+    pairAddress: pool,
+    pairUrl: geckoPoolUrl(pool),
+    quoteSymbol,
+    quotePriceUsd: null,
+    dexId: "ekubo",
+  };
+  return {
+    ...base,
+    // Pinned tokens must use the chart pool's USD, never the blended token price.
+    priceUsd: poolSnap?.priceUsd ?? null,
+    quotePriceUsd: poolSnap?.quotePriceUsd ?? base.quotePriceUsd,
+    liquidityUsd: poolSnap?.liquidityUsd ?? base.liquidityUsd,
+    volume24h: poolSnap?.volume24h ?? base.volume24h,
+    change1h: poolSnap?.change1h ?? base.change1h,
+    change24h: poolSnap?.change24h ?? base.change24h,
+    pairAddress: pool,
+    pairUrl: geckoPoolUrl(pool),
+    quoteSymbol,
+    dexId: poolSnap?.dexId ?? base.dexId ?? "ekubo",
+  };
+}
+
+async function fetchGeckoPool(pool: string): Promise<MarketSnapshot | null> {
+  const body = await fetchJson<GeckoPoolResponse>(
+    `https://api.geckoterminal.com/api/v2/networks/${NETWORK}/pools/${pool}`,
+  );
+  const attrs = body.data?.attributes;
+  const price = num(attrs?.base_token_price_usd);
+  if (price == null && !attrs) return null;
+  return {
+    priceUsd: price,
+    priceNative: null,
+    marketCap: num(attrs?.market_cap_usd) ?? num(attrs?.fdv_usd),
+    liquidityUsd: num(attrs?.reserve_in_usd),
+    volume24h: num(attrs?.volume_usd?.h24),
+    change1h: num(attrs?.price_change_percentage?.h1),
+    change24h: num(attrs?.price_change_percentage?.h24),
+    pairAddress: normalizeAddress(pool),
+    pairUrl: geckoPoolUrl(pool),
+    quoteSymbol: null,
+    quotePriceUsd: num(attrs?.quote_token_price_usd),
+    dexId: "ekubo",
+  };
+}
+
+async function getGeckoPool(pool: string): Promise<MarketSnapshot | null> {
+  const key = normalizeAddress(pool);
+  const hit = poolCache.get(key);
+  if (hit && Date.now() - hit.at < config.chartCacheMs) return hit.value;
+  if (Date.now() < geckoCooldownUntil && hit) return hit.value;
+
+  try {
+    const snapshot = await fetchGeckoPool(key);
+    poolCache.set(key, { at: Date.now(), value: snapshot });
+    return snapshot;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/\b429\b/.test(msg)) {
+      geckoCooldownUntil = Date.now() + 20_000;
+      console.warn("Gecko pool rate-limited; cooling down 20s");
+      if (hit) return hit.value;
+    }
+    console.warn("Gecko pool lookup failed:", error);
+    poolCache.set(key, { at: Date.now(), value: hit?.value ?? null });
+    return hit?.value ?? null;
   }
-  return { ...market, pairAddress: pool, pairUrl: geckoPoolUrl(pool) };
 }
 
 async function fetchGeckoMarket(tokenAddress: string): Promise<MarketSnapshot | null> {
@@ -176,6 +280,7 @@ async function fetchGeckoMarket(tokenAddress: string): Promise<MarketSnapshot | 
     pairAddress: pool,
     pairUrl: pool ? geckoPoolUrl(pool) : geckoTokenUrl(token),
     quoteSymbol: null,
+    quotePriceUsd: null,
     dexId: "ekubo",
   };
 }
@@ -229,17 +334,20 @@ function mergeMarketSnapshots(
     pairAddress: bestPair.pairAddress ?? (isHexPool(dex.pairAddress) ? dex.pairAddress : null),
     pairUrl: bestPair.pairUrl || dex.pairUrl || gecko.pairUrl,
     quoteSymbol: gecko.quoteSymbol ?? dex.quoteSymbol,
+    quotePriceUsd: gecko.quotePriceUsd ?? dex.quotePriceUsd,
     dexId: gecko.dexId ?? dex.dexId,
   };
 }
 
-/** GeckoTerminal + DexScreener; SLAY charts/links use the fixed pool from config. */
+/** GeckoTerminal + DexScreener; SLAY price/ATH/links use the pinned chart pool. */
 export async function getMarketSnapshot(tokenAddress: string): Promise<MarketSnapshot | null> {
-  const [gecko, dex] = await Promise.all([
+  const pool = chartPoolForToken(tokenAddress);
+  const [gecko, dex, chart] = await Promise.all([
     getGeckoMarket(tokenAddress),
     getDexMarket(tokenAddress),
+    pool ? getGeckoPool(pool) : Promise.resolve(null),
   ]);
-  return applyChartPoolOverride(tokenAddress, mergeMarketSnapshots(gecko, dex));
+  return applyChartPoolOverride(tokenAddress, mergeMarketSnapshots(gecko, dex), chart);
 }
 
 const STABLES = new Set(["USDC", "USDT"]);

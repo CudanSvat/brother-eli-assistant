@@ -22,6 +22,7 @@ export interface AlertPayload {
   tokenUnits: number;
   quoteUnits: number;
   quoteSymbol: string;
+  spotPrice: number | null;
   newAth?: boolean;
   previousAth?: number | null;
 }
@@ -42,14 +43,13 @@ export function buildAlert(input: AlertPayload): {
   gifUrl: string | null;
   links: AlertLinks;
 } {
-  const { token, swap, market, usdValue, tokenUnits, newAth, previousAth } = input;
+  const { token, swap, market, usdValue, tokenUnits, spotPrice, newAth, previousAth } = input;
   const emoji = token.emoji;
   const step = Math.max(1, token.emojiStepUsd);
   const count = Math.min(50, Math.max(1, Math.round(usdValue / step)));
   const ladder = Array.from({ length: count }, () => emoji).join("");
-  const execPrice = tokenUnits > 0 && usdValue > 0 ? usdValue / tokenUnits : null;
   const prevPrice = token.lastPriceUsd;
-  const trackedPrice = execPrice ?? market?.priceUsd ?? null;
+  const trackedPrice = spotPrice ?? market?.priceUsd ?? null;
   const move =
     trackedPrice != null && prevPrice != null && Number.isFinite(prevPrice) && prevPrice > 0
       ? ((trackedPrice - prevPrice) / prevPrice) * 100
@@ -78,9 +78,7 @@ export function buildAlert(input: AlertPayload): {
     `Got: ${formatTokenAmount(tokenUnits)} ${escapeHtml(token.symbol)}`,
     swap.hopCount > 1 ? `Route: 1 buy across ${swap.hopCount} pools` : "",
     trackedPrice
-      ? `Price: ${formatTokenPrice(trackedPrice)}${execPrice != null ? " (this buy)" : ""}${
-          moveText ? `  (${moveText} vs prev)` : ""
-        }`
+      ? `Price: ${formatTokenPrice(trackedPrice)}${moveText ? `  (${moveText} vs prev)` : ""}`
       : `Price: —`,
     newAth && trackedPrice
       ? `🏆 <b>NEW ATH</b> ${formatTokenPrice(trackedPrice)}${

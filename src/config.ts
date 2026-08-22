@@ -28,12 +28,19 @@ export const BOT_ABOUT =
 export const EKUBO_CORE =
   "0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b4b";
 
+export const STRK_TOKEN =
+  "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+
 /** SLAY token — charts and Gecko links always use the fixed pool below. */
 export const SLAY_TOKEN =
   "0x02ab526354a39e7f5d272f327fa94e757df3688188d4a92c6dc3623ab79894e2";
 export const SLAY_CHART_POOL =
   process.env.SLAY_CHART_POOL?.trim() ||
   "0x05a3febaff513632474af45ede4b0490af55195e201c3b3a67b2edd11afbb6bf";
+/** Gecko chart pool is SLAY/STRK 1%. Spot/ATH always come from this pair, not the fill. */
+export const SLAY_CHART_QUOTE = STRK_TOKEN;
+/** Ekubo 0.128 fixed-point: floor(1% * 2^128). */
+export const SLAY_CHART_FEE = (1n << 128n) / 100n;
 
 /** Known SLAY ATH (older than public Gecko history). Override via SLAY_ATH_USD. */
 export const SLAY_ATH_USD = (() => {
@@ -52,7 +59,7 @@ export const QUOTE_TOKENS: Record<string, { symbol: string; decimals: number }> 
     symbol: "ETH",
     decimals: 18,
   },
-  "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d": {
+  [STRK_TOKEN]: {
     symbol: "STRK",
     decimals: 18,
   },

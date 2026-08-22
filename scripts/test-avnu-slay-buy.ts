@@ -83,4 +83,6 @@ if (normalizeAddress(merged.quoteAddress) !== normalizeAddress(STRK)) {
   throw new Error(`quote ${merged.quoteAddress}`);
 }
 if (merged.hopCount !== 2) throw new Error(`hops ${merged.hopCount}`);
+if (merged.chartSpot) throw new Error("USDC hop must not be treated as the SLAY/STRK chart pool");
+if (hopUsdcToSlay.sqrtRatioAfter == null) throw new Error("expected sqrt_ratio_after on USDC hop");
 console.log("AVNU STRK→USDC→SLAY buy OK", merged.side, merged.tokenAmount.toString());

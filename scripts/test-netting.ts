@@ -16,6 +16,7 @@ function hop(
     poolKey: { token0, token1, fee: 0n, tickSpacing: 0n, extension: "0x0" },
     delta0,
     delta1,
+    sqrtRatioAfter: null,
     transactionHash: "0xabc",
     blockNumber: 1,
   };

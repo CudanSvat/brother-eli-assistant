@@ -1,4 +1,5 @@
 import { addressesEqual, isQuoteToken, normalizeAddress } from "../lib/format.ts";
+import { chartSpotFromHops } from "../market/pool-price.ts";
 import type { ClassifiedSwap, DecodedSwap } from "../types.ts";
 
 function abs(value: bigint): bigint {
@@ -48,6 +49,7 @@ export function classifyHop(
     blockNumber: swap.blockNumber,
     locker: swap.locker,
     hopCount: 1,
+    chartSpot: chartSpotFromHops([swap], trackedAddress),
   };
 }
 
@@ -111,5 +113,6 @@ export function netTransaction(
     blockNumber: last.blockNumber,
     locker: last.locker,
     hopCount: hops.length,
+    chartSpot: chartSpotFromHops(hops, tracked),
   };
 }

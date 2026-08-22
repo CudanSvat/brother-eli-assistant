@@ -1,6 +1,12 @@
 import type { Bot } from "grammy";
 import { tokensByAddress, updateToken, bumpAthForAddress } from "../store/db.ts";
-import { getMarketSnapshot, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
+import {
+  chartQuoteForToken,
+  getMarketSnapshot,
+  getQuotePriceUsd,
+  resolveChartPair,
+} from "../market/geckoterminal.ts";
+import { usdFromSqrtRatio } from "../market/pool-price.ts";
 import { checkBuyAth } from "./ath.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
@@ -25,13 +31,22 @@ export function attachDispatcher(bot: Bot) {
     const legs = swap.paidLegs.length
       ? swap.paidLegs
       : [{ address: swap.quoteAddress, amount: swap.quoteAmount }];
+    const chartQuote = chartQuoteForToken(swap.tokenAddress);
+    const quoteAddrs = [
+      ...new Set(
+        [
+          ...legs.map((leg) => normalizeAddress(leg.address)),
+          ...(chartQuote ? [normalizeAddress(chartQuote)] : []),
+        ].filter(Boolean),
+      ),
+    ];
     const [market, ...legPrices] = await Promise.all([
       getMarketSnapshot(swap.tokenAddress),
-      ...legs.map((leg) => getQuotePriceUsd(leg.address)),
+      ...quoteAddrs.map((address) => getQuotePriceUsd(address)),
     ]);
     const quotePrices = new Map<string, number | null>();
-    legs.forEach((leg, i) => {
-      quotePrices.set(normalizeAddress(leg.address), legPrices[i] ?? null);
+    quoteAddrs.forEach((address, i) => {
+      quotePrices.set(address, legPrices[i] ?? null);
     });
 
     const chartPair = resolveChartPair(swap.tokenAddress, tokens[0]?.pairAddress);
@@ -42,10 +57,25 @@ export function attachDispatcher(bot: Bot) {
       const values = valueFromSwap(swap, token, market, quotePrices);
       const execPrice =
         values.usdValue > 0 && values.tokenUnits > 0 ? values.usdValue / values.tokenUnits : null;
+      const chartUsd = swap.chartSpot
+        ? usdFromSqrtRatio({
+            ...swap.chartSpot,
+            tokenAddress: token.address,
+            tokenDecimals: token.decimals,
+            quotePriceUsd: (address) => {
+              const chartQuoteAddr = chartQuote ? normalizeAddress(chartQuote) : null;
+              if (chartQuoteAddr && normalizeAddress(address) === chartQuoteAddr && market?.quotePriceUsd) {
+                return market.quotePriceUsd;
+              }
+              return quotePrices.get(normalizeAddress(address)) ?? null;
+            },
+          })
+        : null;
+      const spotPrice = chartUsd ?? market?.priceUsd ?? token.lastPriceUsd ?? null;
       const athCheck = await checkBuyAth(
         token,
         chartPair ?? resolveChartPair(swap.tokenAddress, token.pairAddress),
-        execPrice,
+        chartUsd,
       );
       const newAth = athCheck?.newAth ?? false;
       const meetsMin = values.usdValue >= token.minUsd;
@@ -58,7 +88,7 @@ export function attachDispatcher(bot: Bot) {
       }
 
       console.log(
-        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${newAth ? " NEW_ATH" : ""}${!meetsMin && newAth ? " (below min)" : ""}`,
+        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${newAth ? " NEW_ATH" : ""}${!meetsMin && newAth ? " (below min)" : ""} spot=${spotPrice != null ? formatTokenPrice(spotPrice) : "—"} fill=${execPrice != null ? formatTokenPrice(execPrice) : "—"}`,
       );
 
       const postKey = `${token.chatId}:${swap.transactionHash}:${swap.tokenAddress}:buy`;
@@ -71,6 +101,7 @@ export function attachDispatcher(bot: Bot) {
         swap,
         market,
         ...values,
+        spotPrice,
         newAth: athCheck?.newAth,
         previousAth: athCheck?.previousAth,
       });
@@ -82,31 +113,27 @@ export function attachDispatcher(bot: Bot) {
         gifUrl: card.gifUrl,
       });
 
-      if (meetsMin && market?.priceUsd && token.priceAlertPct != null && token.lastPriceUsd) {
-        const trackPrice =
-          values.usdValue > 0 && values.tokenUnits > 0
-            ? values.usdValue / values.tokenUnits
-            : market.priceUsd;
-        const move = ((trackPrice - token.lastPriceUsd) / token.lastPriceUsd) * 100;
+      if (meetsMin && spotPrice && token.priceAlertPct != null && token.lastPriceUsd) {
+        const move = ((spotPrice - token.lastPriceUsd) / token.lastPriceUsd) * 100;
         if (Math.abs(move) >= token.priceAlertPct) {
           const dir = move >= 0 ? "up" : "down";
           enqueueAlert(bot.api, {
             chatId: token.chatId,
-            caption: `<b>${token.symbol} price ${dir} ${move.toFixed(1)}%</b>\nNow ${formatTokenPrice(trackPrice)}`,
+            caption: `<b>${token.symbol} price ${dir} ${move.toFixed(1)}%</b>\nNow ${formatTokenPrice(spotPrice)}`,
             links: card.links,
             gifUrl: null,
           });
         }
       }
 
-      const trackPrice = execPrice ?? market?.priceUsd ?? null;
+      const trackPrice = chartUsd ?? market?.priceUsd ?? token.lastPriceUsd ?? null;
       if (trackPrice) {
         updateToken(token.id, {
           lastPriceUsd: trackPrice,
           pairAddress: resolveChartPair(swap.tokenAddress, market?.pairAddress ?? token.pairAddress),
           athPriceUsd: athCheck?.nextAth ?? token.athPriceUsd,
         });
-        if (athCheck?.nextAth) {
+        if (athCheck?.newAth && athCheck.nextAth) {
           bumpAthForAddress(swap.tokenAddress, athCheck.nextAth);
         }
       }
