@@ -72,8 +72,8 @@ export function buildAlert(input: AlertPayload): {
         }`
       : `Price: —`,
     newAth && trackedPrice
-      ? `🏆 ATH ${formatTokenPrice(trackedPrice)}${
-          previousAth ? ` · prev ${formatTokenPrice(previousAth)}` : ""
+      ? `🏆 <b>NEW ATH</b> ${formatTokenPrice(trackedPrice)}${
+          previousAth ? ` · beat ${formatTokenPrice(previousAth)}` : ""
         }`
       : "",
     `MC ${formatUsd(market?.marketCap)} · Liq ${formatUsd(market?.liquidityUsd)} · Vol ${formatUsd(market?.volume24h)}`,

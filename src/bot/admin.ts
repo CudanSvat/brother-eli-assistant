@@ -16,7 +16,8 @@ import {
   upsertGroup,
 } from "../store/db.ts";
 import { resolveToken } from "../market/tokens.ts";
-import { getPoolAthUsd, resolveChartPair } from "../market/geckoterminal.ts";
+import { resolveChartPair } from "../market/geckoterminal.ts";
+import { seedAthUsd } from "./ath.ts";
 import {
   adminHomeText,
   cancelKeyboard,
@@ -592,11 +593,9 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
           ...resolved,
         });
         const pair = resolveChartPair(resolved.address, resolved.pairAddress);
-        if (pair) {
-          const ath = await getPoolAthUsd(pair);
-          if (ath) {
-            updateToken(token.id, { athPriceUsd: ath });
-          }
+        const ath = await seedAthUsd(resolved.address, pair);
+        if (ath) {
+          updateToken(token.id, { athPriceUsd: ath });
         }
         await ctx.reply(
           `Token <b>${token.symbol}</b> added [${countTokens(action.chatId)}/${config.maxTokensPerGroup}]`,

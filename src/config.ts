@@ -35,6 +35,16 @@ export const SLAY_CHART_POOL =
   process.env.SLAY_CHART_POOL?.trim() ||
   "0x05a3febaff513632474af45ede4b0490af55195e201c3b3a67b2edd11afbb6bf";
 
+/** Known SLAY ATH (older than public Gecko history). Override via SLAY_ATH_USD. */
+export const SLAY_ATH_USD = (() => {
+  const raw = process.env.SLAY_ATH_USD?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0.002019;
+})();
+
 export const SWAPPED_SELECTOR = hash.getSelectorFromName("Swapped");
 
 export const QUOTE_TOKENS: Record<string, { symbol: string; decimals: number }> = {
