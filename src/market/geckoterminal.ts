@@ -464,7 +464,7 @@ async function tryOhlcv(
 async function fetchDayHistory(pool: string): Promise<Candle[]> {
   const byTime = new Map<number, Candle>();
   let before: number | undefined;
-  const maxPages = config.coingeckoApiKey ? 12 : 2;
+  const maxPages = config.coingeckoApiKey ? 12 : 1;
 
   for (let page = 0; page < maxPages; page++) {
     if (Date.now() < geckoCooldownUntil) break;
