@@ -293,14 +293,18 @@ function applySpot(
 }
 
 function priceWindow(candles: Candle[]): { min: number; max: number } {
-  const samples = candles.flatMap((c) => [c.open, c.close, c.high, c.low]).sort((a, b) => a - b);
-  let min = percentile(samples, 4);
-  let max = percentile(samples, 96);
-  if (max <= min) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const c of candles) {
+    if (finite(c.low)) min = Math.min(min, c.low);
+    if (finite(c.high)) max = Math.max(max, c.high);
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    const samples = candles.flatMap((c) => [c.open, c.close, c.high, c.low]).filter(finite);
     min = Math.min(...samples);
     max = Math.max(...samples);
   }
-  const pad = (max - min) * 0.14 || max * 0.04;
+  const pad = (max - min) * 0.1 || max * 0.04;
   return { min: Math.max(0, min - pad), max: max + pad };
 }
 
