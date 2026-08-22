@@ -119,6 +119,17 @@ SQLite file: `data/brother-eli.db`
 
 Repo: [github.com/CudanSvat/brother-eli-assistant](https://github.com/CudanSvat/brother-eli-assistant)
 
+Two Railway services run **the same code** from `main`. Test on the test bot first; when it looks good, push to `main` and both redeploy.
+
+| Service | Bot | DB volume |
+|---------|-----|-----------|
+| `brother-eli-assistant` | `@brotherelibuybot` (production) | `/data/brother-eli.db` |
+| `brother-eli-test` | `@brotherelibuytestbot` (testing) | `/data/brother-eli-test.db` |
+
+Everything else should match: `STARKNET_RPC_URL`, `NODE_VERSION`, optional `COINGECKO_API_KEY`, optional `SLAY_CHART_POOL`. Only `TELEGRAM_BOT_TOKEN` and `DATABASE_PATH` differ.
+
+Token settings (min buy, GIF, chart on/off) live in each service's SQLite file — configure SLAY separately on the test bot before testing.
+
 The bot token lives in `.env` and is gitignored. Production on Railway uses:
 
 - `TELEGRAM_BOT_TOKEN` (set in the Railway dashboard / CLI, never committed)

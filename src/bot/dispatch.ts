@@ -69,12 +69,6 @@ export function attachDispatcher(bot: Bot) {
       if (swap.side !== "buy") continue;
 
       const values = valueFromSwap(swap, token, market, quotePrices);
-      if (values.usdValue < token.minUsd) {
-        console.log(
-          `Skip ${token.symbol} buy ${formatUsd(values.usdValue)} < min ${formatUsd(token.minUsd)} tx ${shortAddress(swap.transactionHash)}`,
-        );
-        continue;
-      }
       const execPrice =
         values.usdValue > 0 && values.tokenUnits > 0 ? values.usdValue / values.tokenUnits : null;
       const athCheck = await checkBuyAth(
@@ -82,9 +76,18 @@ export function attachDispatcher(bot: Bot) {
         chartPair ?? resolveChartPair(swap.tokenAddress, token.pairAddress),
         execPrice,
       );
+      const newAth = athCheck?.newAth ?? false;
+      const meetsMin = values.usdValue >= token.minUsd;
+
+      if (!meetsMin && !newAth) {
+        console.log(
+          `Skip ${token.symbol} buy ${formatUsd(values.usdValue)} < min ${formatUsd(token.minUsd)} tx ${shortAddress(swap.transactionHash)}`,
+        );
+        continue;
+      }
 
       console.log(
-        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${athCheck?.newAth ? " NEW_ATH" : ""}`,
+        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${newAth ? " NEW_ATH" : ""}${!meetsMin && newAth ? " (below min)" : ""}`,
       );
 
       const postKey = `${token.chatId}:${swap.transactionHash}:${swap.tokenAddress}:buy`;
@@ -106,10 +109,10 @@ export function attachDispatcher(bot: Bot) {
         caption: card.caption,
         links: card.links,
         gifUrl: card.gifUrl,
-        chartPng: token.chartEnabled ? chartPng : null,
+        chartPng: token.chartEnabled && meetsMin ? chartPng : null,
       });
 
-      if (market?.priceUsd && token.priceAlertPct != null && token.lastPriceUsd) {
+      if (meetsMin && market?.priceUsd && token.priceAlertPct != null && token.lastPriceUsd) {
         const trackPrice =
           values.usdValue > 0 && values.tokenUnits > 0
             ? values.usdValue / values.tokenUnits

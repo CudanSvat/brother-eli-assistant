@@ -412,6 +412,21 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     await ask(ctx, "Send a GIF in this chat (or an mp4). You can also send a URL, or none to clear.");
   });
 
+  bot.callbackQuery(/^t:agif:(\d+)$/, async (ctx) => {
+    const groupId = await requireAdmin(ctx);
+    if (!groupId) return deny(ctx);
+    pending.set(pendingKey(ctx.from!.id, ctx.chat!.id), {
+      kind: "set_ath_gif",
+      chatId: groupId,
+      tokenId: Number(ctx.match![1]),
+    });
+    await ctx.answerCallbackQuery();
+    await ask(
+      ctx,
+      "Send the NEW ATH GIF in this chat (or an mp4 / URL). Send none to clear.\nIt plays when a buy hits a new all-time high.",
+    );
+  });
+
   bot.callbackQuery(/^t:wgif:(\d+)$/, async (ctx) => {
     const groupId = await requireAdmin(ctx);
     if (!groupId) return deny(ctx);
@@ -515,7 +530,10 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
   bot.on(["message:animation", "message:video", "message:document"], async (ctx, next) => {
     if (!ctx.from || !ctx.chat) return next();
     const action = pending.get(pendingKey(ctx.from.id, ctx.chat.id));
-    if (!action || (action.kind !== "set_gif" && action.kind !== "set_whale_gif")) {
+    if (
+      !action ||
+      (action.kind !== "set_gif" && action.kind !== "set_whale_gif" && action.kind !== "set_ath_gif")
+    ) {
       return next();
     }
     if (!(await userIsGroupAdmin(ctx, action.chatId))) return next();
@@ -532,10 +550,13 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       await ctx.reply("Token not found.");
       return;
     }
-    const nextToken = updateToken(
-      token.id,
-      action.kind === "set_gif" ? { gifUrl: fileId } : { whaleGifUrl: fileId },
-    );
+    const patch =
+      action.kind === "set_gif"
+        ? { gifUrl: fileId }
+        : action.kind === "set_whale_gif"
+          ? { whaleGifUrl: fileId }
+          : { athGifUrl: fileId };
+    const nextToken = updateToken(token.id, patch);
     await ctx.reply(tokenCardText(nextToken!), {
       parse_mode: "HTML",
       reply_markup: tokenKeyboard(nextToken!),
@@ -657,7 +678,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       return;
     }
 
-    if (action.kind === "set_gif" || action.kind === "set_whale_gif") {
+    if (action.kind === "set_gif" || action.kind === "set_whale_gif" || action.kind === "set_ath_gif") {
       const cleared = /^(none|off|clear|-)$/i.test(text);
       const url = cleared ? null : text;
       if (url && !/^https?:\/\//i.test(url)) {
@@ -667,7 +688,13 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         });
         return;
       }
-      const nextToken = updateToken(token.id, action.kind === "set_gif" ? { gifUrl: url } : { whaleGifUrl: url });
+      const patch =
+        action.kind === "set_gif"
+          ? { gifUrl: url }
+          : action.kind === "set_whale_gif"
+            ? { whaleGifUrl: url }
+            : { athGifUrl: url };
+      const nextToken = updateToken(token.id, patch);
       await ctx.reply(tokenCardText(nextToken!), { parse_mode: "HTML", reply_markup: tokenKeyboard(nextToken!) });
       return;
     }

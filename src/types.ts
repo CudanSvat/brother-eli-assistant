@@ -14,6 +14,7 @@ export interface TokenSettings {
   emojiStepUsd: number;
   gifUrl: string | null;
   whaleGifUrl: string | null;
+  athGifUrl: string | null;
   whaleUsd: number;
   chartEnabled: boolean;
   priceAlertPct: number | null;
@@ -92,5 +93,6 @@ export type PendingAction =
   | { kind: "set_step"; chatId: number; tokenId: number }
   | { kind: "set_gif"; chatId: number; tokenId: number }
   | { kind: "set_whale_gif"; chatId: number; tokenId: number }
+  | { kind: "set_ath_gif"; chatId: number; tokenId: number }
   | { kind: "set_whale_usd"; chatId: number; tokenId: number }
   | { kind: "set_price_pct"; chatId: number; tokenId: number };

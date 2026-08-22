@@ -22,6 +22,7 @@ interface TokenRow {
   emoji_step_usd: number;
   gif_url: string | null;
   whale_gif_url: string | null;
+  ath_gif_url: string | null;
   whale_usd: number | null;
   chart_enabled: number;
   alert_buys: number;
@@ -46,6 +47,7 @@ function mapToken(row: TokenRow): TokenSettings {
     emojiStepUsd: row.emoji_step_usd,
     gifUrl: row.gif_url,
     whaleGifUrl: row.whale_gif_url,
+    athGifUrl: row.ath_gif_url,
     whaleUsd: row.whale_usd ?? 500,
     chartEnabled: Boolean(row.chart_enabled),
     priceAlertPct: row.price_alert_pct,
@@ -106,6 +108,9 @@ export function openDb(): Database.Database {
   }
   if (!cols.some((col) => col.name === "ath_price_usd")) {
     db.exec("ALTER TABLE tokens ADD COLUMN ath_price_usd REAL");
+  }
+  if (!cols.some((col) => col.name === "ath_gif_url")) {
+    db.exec("ALTER TABLE tokens ADD COLUMN ath_gif_url TEXT");
   }
   return db;
 }
@@ -233,6 +238,7 @@ export function updateToken(
     emojiStepUsd: number;
     gifUrl: string | null;
     whaleGifUrl: string | null;
+    athGifUrl: string | null;
     whaleUsd: number;
     chartEnabled: boolean;
     priceAlertPct: number | null;
@@ -253,6 +259,7 @@ export function updateToken(
          emoji_step_usd = @emojiStepUsd,
          gif_url = @gifUrl,
          whale_gif_url = @whaleGifUrl,
+         ath_gif_url = @athGifUrl,
          whale_usd = @whaleUsd,
          chart_enabled = @chartEnabled,
          price_alert_pct = @priceAlertPct,
@@ -269,6 +276,7 @@ export function updateToken(
       emojiStepUsd: next.emojiStepUsd,
       gifUrl: next.gifUrl,
       whaleGifUrl: next.whaleGifUrl,
+      athGifUrl: next.athGifUrl,
       whaleUsd: next.whaleUsd,
       chartEnabled: next.chartEnabled ? 1 : 0,
       priceAlertPct: next.priceAlertPct,

@@ -26,6 +26,17 @@ export interface AlertPayload {
   previousAth?: number | null;
 }
 
+/** Pick GIF for a buy card: ATH special > whale size > default buy GIF. */
+export function pickBuyGif(
+  token: TokenSettings,
+  usdValue: number,
+  newAth?: boolean,
+): string | null {
+  if (newAth && token.athGifUrl) return token.athGifUrl;
+  if (token.whaleGifUrl && usdValue >= token.whaleUsd) return token.whaleGifUrl;
+  return token.gifUrl;
+}
+
 export function buildAlert(input: AlertPayload): {
   caption: string;
   gifUrl: string | null;
@@ -86,7 +97,7 @@ export function buildAlert(input: AlertPayload): {
     avnu: avnuSwapUrl(token.address, token.symbol),
   };
 
-  return { caption: lines.join("\n"), gifUrl: token.gifUrl, links };
+  return { caption: lines.join("\n"), gifUrl: pickBuyGif(token, usdValue, newAth), links };
 }
 
 export interface AlertLinks {
@@ -164,6 +175,7 @@ export function tokenCardText(token: TokenSettings): string {
     `Min buy: <b>${formatUsd(token.minUsd)}</b>`,
     `Emoji: ${token.emoji}  ·  one extra every ${formatUsd(token.emojiStepUsd)}`,
     `GIF: ${token.gifUrl ? "set" : "none"}`,
+    `ATH GIF: ${token.athGifUrl ? "set" : "none"}`,
     `Chart: ${token.chartEnabled ? "on" : "off"}`,
     `Price ping: ${token.priceAlertPct != null ? `when price moves ±${token.priceAlertPct}%` : "off"}`,
   ].join("\n");
@@ -190,6 +202,7 @@ export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
     .text(`Step ${formatUsd(token.emojiStepUsd)}`, `t:step:${token.id}`)
     .row()
     .text(token.gifUrl ? "Change GIF" : "Set GIF", `t:gif:${token.id}`)
+    .text(token.athGifUrl ? "Change ATH GIF" : "Set ATH GIF", `t:agif:${token.id}`)
     .text(token.chartEnabled ? "Chart: on" : "Chart: off", `t:chart:${token.id}`)
     .row()
     .text(
