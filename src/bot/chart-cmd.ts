@@ -95,7 +95,11 @@ async function buildChart(
       keepEmpty: true,
     });
     if (!png) return null;
-    const price = market?.priceUsd ?? token.lastPriceUsd;
+    const lastClose = chartCandles.at(-1)?.close;
+    const price =
+      market?.priceUsd ??
+      token.lastPriceUsd ??
+      (lastClose != null && Number.isFinite(lastClose) && lastClose > 0 ? lastClose : null);
     const allNote = window === "all" && !config.coingeckoApiKey ? " · public API ~180d max" : "";
     return {
       png,
