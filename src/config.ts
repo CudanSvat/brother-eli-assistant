@@ -33,7 +33,7 @@ export const SLAY_TOKEN =
   "0x02ab526354a39e7f5d272f327fa94e757df3688188d4a92c6dc3623ab79894e2";
 export const SLAY_CHART_POOL =
   process.env.SLAY_CHART_POOL?.trim() ||
-  "0x07f1d6f17b3b8d2c402bbad5179e64eb36cd25a2d6db158d99489a17e6d2b67d";
+  "0x05a3febaff513632474af45ede4b0490af55195e201c3b3a67b2edd11afbb6bf";
 
 export const SWAPPED_SELECTOR = hash.getSelectorFromName("Swapped");
 
