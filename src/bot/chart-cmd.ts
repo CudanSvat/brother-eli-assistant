@@ -4,6 +4,7 @@ import { formatTokenPrice } from "../lib/format.ts";
 import {
   CHART_WINDOWS,
   DEFAULT_CHART_WINDOW,
+  chartPoolForToken,
   chartWindowLabel,
   geckoChartUrlForToken,
   getMarketSnapshot,
@@ -13,6 +14,7 @@ import {
   type ChartWindow,
 } from "../market/geckoterminal.ts";
 import { config } from "../config.ts";
+import { sleep } from "../lib/format.ts";
 import { getDmSession, getToken, listTokens } from "../store/db.ts";
 import type { TokenSettings } from "../types.ts";
 
@@ -63,16 +65,24 @@ async function buildChart(
   token: TokenSettings,
   window: ChartWindow,
 ): Promise<{ png: Buffer; caption: string; geckoUrl: string } | null> {
-  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
-  try {
-    market = await getMarketSnapshot(token.address);
-  } catch {
-    market = null;
-  }
-  const pair = resolveChartPair(token.address, market?.pairAddress ?? token.pairAddress);
+  const pair = resolveChartPair(token.address, token.pairAddress);
   if (!pair) return null;
 
-  const { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
+  // OHLCV first — pinned-pool tokens skip Gecko market lookup entirely.
+  let { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
+  if (candles.length < 2) {
+    await sleep(2_500);
+    ({ candles, intervalLabel } = await getOhlcvForWindow(pair, window));
+  }
+
+  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
+  if (!chartPoolForToken(token.address)) {
+    try {
+      market = await getMarketSnapshot(token.address);
+    } catch {
+      market = null;
+    }
+  }
 
   const finish = (
     chartCandles: typeof candles,

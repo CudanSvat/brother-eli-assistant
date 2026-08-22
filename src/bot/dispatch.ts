@@ -42,8 +42,8 @@ export function attachDispatcher(bot: Bot) {
 
     let chartPng: Buffer | null = null;
     const needsChart = tokens.some((token) => token.chartEnabled);
-    const chartPair = resolveChartPair(swap.tokenAddress, market?.pairAddress ?? tokens[0]?.pairAddress);
-    if (needsChart) {
+    const chartPair = resolveChartPair(swap.tokenAddress, tokens[0]?.pairAddress);
+    if (needsChart && chartPair) {
       try {
         const candles = await getOhlcv(chartPair);
         chartPng = renderChartPng(tokens[0]!.symbol, candles, {

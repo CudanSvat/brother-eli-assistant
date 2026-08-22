@@ -268,6 +268,8 @@ const WINDOW_MS: Record<ChartWindow, number> = {
 
 /** How long a successful series pack stays warm (button switches hit cache). */
 const SERIES_CACHE_MS = 90_000;
+/** During Gecko 429 cooldown, serve last good candles up to this age. */
+const STALE_SERIES_MS = 600_000;
 const BUYCARD_CACHE_MS = 20_000;
 
 interface SeriesPack {
@@ -276,6 +278,21 @@ interface SeriesPack {
   mid: Candle[]; // 15m
   hour: Candle[]; // 1h
   day: Candle[]; // 1d
+}
+
+function seriesPackHasData(pack: SeriesPack): boolean {
+  return pack.fine.length >= 2 || pack.mid.length >= 2 || pack.hour.length >= 2 || pack.day.length >= 2;
+}
+
+function cacheSeriesPack(key: string, pack: SeriesPack, previous?: SeriesPack): void {
+  if (seriesPackHasData(pack)) {
+    pack.at = Date.now();
+    seriesPackCache.set(key, pack);
+    return;
+  }
+  if (previous && seriesPackHasData(previous)) {
+    seriesPackCache.set(key, previous);
+  }
 }
 
 const seriesPackCache = new Map<string, SeriesPack>();
@@ -406,9 +423,7 @@ async function tryOhlcv(
   limit: number,
   opts: { beforeTimestamp?: number; includeEmpty?: boolean } = {},
 ): Promise<Candle[]> {
-  if (Date.now() < geckoCooldownUntil) {
-    throw new Error(`429 Too Many Requests (cooldown ${Math.ceil((geckoCooldownUntil - Date.now()) / 1000)}s)`);
-  }
+  if (Date.now() < geckoCooldownUntil) return [];
 
   const params = new URLSearchParams({
     aggregate: String(aggregate),
@@ -482,8 +497,11 @@ async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<Serie
   const key = pool.toLowerCase();
   const preferField = prefer ? WINDOW_PLAN[prefer].field : "hour";
   const hit = seriesPackCache.get(key);
-  if (hit && Date.now() - hit.at < SERIES_CACHE_MS && hit[preferField].length >= 2) {
-    return hit;
+  if (hit && hit[preferField].length >= 2) {
+    const age = Date.now() - hit.at;
+    if (age < SERIES_CACHE_MS || (Date.now() < geckoCooldownUntil && age < STALE_SERIES_MS)) {
+      return hit;
+    }
   }
 
   const inflight = seriesPackInflight.get(key);
@@ -491,7 +509,7 @@ async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<Serie
 
   const promise = (async (): Promise<SeriesPack> => {
     const pack: SeriesPack = {
-      at: Date.now(),
+      at: hit?.at ?? Date.now(),
       fine: hit?.fine ?? [],
       mid: hit?.mid ?? [],
       hour: hit?.hour ?? [],
@@ -499,7 +517,8 @@ async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<Serie
     };
 
     const loadField = async (field: keyof Omit<SeriesPack, "at">): Promise<void> => {
-      if (pack[field].length >= 2 || Date.now() < geckoCooldownUntil) return;
+      if (pack[field].length >= 2) return;
+      if (Date.now() < geckoCooldownUntil) return;
       try {
         if (field === "day") {
           const days = await fetchDayHistory(pool);
@@ -527,16 +546,15 @@ async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<Serie
     if (preferField === "mid" && pack.mid.length < 2) await loadField("hour");
     if (preferField === "day" && pack.day.length < 2) await loadField("hour");
 
-    pack.at = Date.now();
-    seriesPackCache.set(key, pack);
+    cacheSeriesPack(key, pack, hit);
+    if (!seriesPackHasData(pack) && hit && seriesPackHasData(hit)) return hit;
 
     // Warm remaining series in the background (don't block the chart).
     void (async () => {
       for (const field of ["hour", "mid", "day", "fine"] as const) {
         if (field === preferField) continue;
         await loadField(field);
-        pack.at = Date.now();
-        seriesPackCache.set(key, { ...pack });
+        cacheSeriesPack(key, pack, hit);
       }
     })();
 
