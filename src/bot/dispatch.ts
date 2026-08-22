@@ -1,6 +1,6 @@
 import type { Bot } from "grammy";
 import { tokensByAddress, updateToken } from "../store/db.ts";
-import { getMarketSnapshot, getOhlcv, getQuotePriceUsd } from "../market/geckoterminal.ts";
+import { getMarketSnapshot, getOhlcv, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
 import { renderChartPng } from "../chart/render.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
@@ -42,15 +42,21 @@ export function attachDispatcher(bot: Bot) {
 
     let chartPng: Buffer | null = null;
     const needsChart = tokens.some((token) => token.chartEnabled);
+    const chartPair = resolveChartPair(swap.tokenAddress, market?.pairAddress ?? tokens[0]?.pairAddress);
     if (needsChart) {
       try {
-        const candles = await getOhlcv(market?.pairAddress ?? tokens[0]?.pairAddress);
+        const candles = await getOhlcv(chartPair);
         chartPng = renderChartPng(tokens[0]!.symbol, candles, {
           quote: market?.quoteSymbol ?? "USD",
           spot: spotPrice
             ? { price: spotPrice, volumeUsd: sampleValues.usdValue, timeSec: Math.floor(Date.now() / 1000) }
             : undefined,
         });
+        if (!chartPng) {
+          console.warn(
+            `Buy-card chart skipped for ${tokens[0]!.symbol}: ${candles.length} candles (pair=${chartPair ?? "none"})`,
+          );
+        }
       } catch (error) {
         console.warn("Chart render failed:", error);
       }
@@ -115,7 +121,7 @@ export function attachDispatcher(bot: Bot) {
       if (trackPrice) {
         updateToken(token.id, {
           lastPriceUsd: trackPrice,
-          pairAddress: market?.pairAddress ?? token.pairAddress,
+          pairAddress: resolveChartPair(swap.tokenAddress, market?.pairAddress ?? token.pairAddress),
         });
       }
     }

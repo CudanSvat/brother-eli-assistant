@@ -11,8 +11,7 @@ import {
   toUnitAmount,
 } from "../lib/format.ts";
 import { avnuSwapUrl, ekuboSwapUrl, starkscanTxUrl } from "../market/ekubo.ts";
-import { geckoTokenUrl } from "../market/geckoterminal.ts";
-import { dexScreenerTokenUrl } from "../market/dexscreener.ts";
+import { geckoChartUrlForToken } from "../market/geckoterminal.ts";
 import type { ClassifiedSwap, MarketSnapshot, TokenSettings } from "../types.ts";
 
 export interface AlertPayload {
@@ -73,7 +72,7 @@ export function buildAlert(input: AlertPayload): {
 
   const links: AlertLinks = {
     tx: starkscanTxUrl(swap.transactionHash),
-    gecko: market?.pairUrl || geckoTokenUrl(token.address) || dexScreenerTokenUrl(token.address),
+    gecko: geckoChartUrlForToken(token.address, market),
     ekubo: ekuboSwapUrl(token.address),
     avnu: avnuSwapUrl(token.address, token.symbol),
   };

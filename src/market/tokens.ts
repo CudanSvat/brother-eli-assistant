@@ -1,6 +1,6 @@
 import { RpcProvider, num } from "starknet";
 import { getEkuboToken } from "./ekubo.ts";
-import { getMarketSnapshot } from "./geckoterminal.ts";
+import { getMarketSnapshot, resolveChartPair } from "./geckoterminal.ts";
 import { isStarknetAddress, normalizeAddress } from "../lib/format.ts";
 
 const ERC20_ABI = [
@@ -95,7 +95,7 @@ export async function resolveToken(
     symbol: (symbol || "TOKEN").slice(0, 20),
     name: name || symbol || "Unknown",
     decimals: Number.isFinite(decimals) ? Number(decimals) : 18,
-    pairAddress: market?.pairAddress ?? null,
+    pairAddress: resolveChartPair(address, market?.pairAddress ?? null),
     quoteAddress: null,
   };
 }

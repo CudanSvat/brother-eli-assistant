@@ -5,12 +5,11 @@ import {
   CHART_WINDOWS,
   DEFAULT_CHART_WINDOW,
   chartWindowLabel,
-  geckoPoolUrl,
-  geckoTokenUrl,
+  geckoChartUrlForToken,
   getMarketSnapshot,
   getOhlcvForWindow,
   isChartWindow,
-  isHexPool,
+  resolveChartPair,
   type ChartWindow,
 } from "../market/geckoterminal.ts";
 import { config } from "../config.ts";
@@ -44,11 +43,8 @@ function pickToken(tokens: TokenSettings[], query?: string): TokenSettings | nul
   );
 }
 
-function geckoChartLink(token: TokenSettings, pair?: string | null, marketUrl?: string | null): string {
-  if (marketUrl) return marketUrl;
-  if (pair && isHexPool(pair)) return geckoPoolUrl(pair);
-  if (token.pairAddress && isHexPool(token.pairAddress)) return geckoPoolUrl(token.pairAddress);
-  return geckoTokenUrl(token.address);
+function geckoChartLink(token: TokenSettings, market?: Awaited<ReturnType<typeof getMarketSnapshot>>): string {
+  return geckoChartUrlForToken(token.address, market);
 }
 
 function chartKeyboard(tokenId: number, active: ChartWindow, geckoUrl: string): InlineKeyboard {
@@ -67,18 +63,25 @@ async function buildChart(
   token: TokenSettings,
   window: ChartWindow,
 ): Promise<{ png: Buffer; caption: string; geckoUrl: string } | null> {
-  const knownPair = token.pairAddress;
+  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
+  try {
+    market = await getMarketSnapshot(token.address);
+  } catch {
+    market = null;
+  }
+  const pair = resolveChartPair(token.address, market?.pairAddress ?? token.pairAddress);
+  if (!pair) return null;
+
+  const { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
 
   const finish = (
-    candles: Awaited<ReturnType<typeof getOhlcvForWindow>>["candles"],
-    intervalLabel: string,
-    market: Awaited<ReturnType<typeof getMarketSnapshot>>,
-    pair: string | null,
+    chartCandles: typeof candles,
+    label: string,
   ) => {
-    if (candles.length < 2) return null;
-    const png = renderChartPng(token.symbol, candles, {
+    if (chartCandles.length < 2) return null;
+    const png = renderChartPng(token.symbol, chartCandles, {
       quote: market?.quoteSymbol ?? "USD",
-      intervalLabel,
+      intervalLabel: label,
       keepEmpty: true,
     });
     if (!png) return null;
@@ -87,33 +90,14 @@ async function buildChart(
     return {
       png,
       caption: [
-        `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${intervalLabel}${allNote}`,
+        `<b>${token.symbol}</b> · ${chartWindowLabel(window)} · ${label}${allNote}`,
         `Price: ${formatTokenPrice(price)}`,
       ].join("\n"),
-      geckoUrl: geckoChartLink(token, pair, market?.pairUrl),
+      geckoUrl: geckoChartLink(token, market),
     };
   };
 
-  // When we already know the pool, fetch candles immediately and enrich price in parallel.
-  if (knownPair) {
-    const [market, ohlcv] = await Promise.all([
-      getMarketSnapshot(token.address).catch(() => null),
-      getOhlcvForWindow(knownPair, window),
-    ]);
-    return finish(ohlcv.candles, ohlcv.intervalLabel, market, knownPair);
-  }
-
-  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
-  try {
-    market = await getMarketSnapshot(token.address);
-  } catch {
-    market = null;
-  }
-  const pair = market?.pairAddress ?? null;
-  if (!pair) return null;
-
-  const { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
-  return finish(candles, intervalLabel, market, pair);
+  return finish(candles, intervalLabel);
 }
 
 async function sendOrEditChart(

@@ -28,6 +28,13 @@ export const BOT_ABOUT =
 export const EKUBO_CORE =
   "0x00000005dd3D2F4429AF886cD1a3b08289DBcEa99A294197E9eB43b0e0325b4b";
 
+/** SLAY token — charts and Gecko links always use the fixed pool below. */
+export const SLAY_TOKEN =
+  "0x02ab526354a39e7f5d272f327fa94e757df3688188d4a92c6dc3623ab79894e2";
+export const SLAY_CHART_POOL =
+  process.env.SLAY_CHART_POOL?.trim() ||
+  "0x07f1d6f17b3b8d2c402bbad5179e64eb36cd25a2d6db158d99489a17e6d2b67d";
+
 export const SWAPPED_SELECTOR = hash.getSelectorFromName("Swapped");
 
 export const QUOTE_TOKENS: Record<string, { symbol: string; decimals: number }> = {

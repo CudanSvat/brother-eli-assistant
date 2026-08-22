@@ -1,4 +1,4 @@
-import { QUOTE_TOKENS, config } from "../config.ts";
+import { QUOTE_TOKENS, SLAY_CHART_POOL, SLAY_TOKEN, config } from "../config.ts";
 import { fetchJson, normalizeAddress, sleep } from "../lib/format.ts";
 import { getMarketForToken as getDexMarket } from "./dexscreener.ts";
 import type { Candle, MarketSnapshot } from "../types.ts";
@@ -39,15 +39,18 @@ interface GeckoTokenResponse {
       top_pools?: { data?: Array<{ id: string }> };
     };
   };
-  included?: Array<{
-    type?: string;
-    attributes?: {
-      address?: string;
-      reserve_in_usd?: string;
-      volume_usd?: { h24?: string };
-      price_change_percentage?: { h1?: string; h24?: string };
-    };
-  }>;
+  included?: GeckoPoolIncluded[];
+}
+
+interface GeckoPoolIncluded {
+  type?: string;
+  id?: string;
+  attributes?: {
+    address?: string;
+    reserve_in_usd?: string;
+    volume_usd?: { h24?: string };
+    price_change_percentage?: { h1?: string; h24?: string };
+  };
 }
 
 interface OhlcvResponse {
@@ -67,7 +70,30 @@ function num(value: string | null | undefined): number | null {
 function geckoPoolAddress(id: string | undefined): string | null {
   if (!id) return null;
   const hex = id.split("_").pop();
-  return hex?.startsWith("0x") ? hex : null;
+  return hex?.startsWith("0x") ? normalizeAddress(hex) : null;
+}
+
+function poolAddressFromIncluded(item: GeckoPoolIncluded): string | null {
+  const fromId = geckoPoolAddress(item.id);
+  if (fromId) return fromId;
+  const raw = item.attributes?.address;
+  return raw ? normalizeAddress(raw) : null;
+}
+
+/** Prefer the pool with the most 24h volume — that is usually where buys land. */
+function pickBestGeckoPool(included: GeckoPoolIncluded[] | undefined): GeckoPoolIncluded | null {
+  const pools = (included ?? []).filter((item) => item.type === "pool");
+  if (!pools.length) return null;
+  return [...pools].sort((a, b) => {
+    const volDiff = (num(b.attributes?.volume_usd?.h24) ?? 0) - (num(a.attributes?.volume_usd?.h24) ?? 0);
+    if (volDiff !== 0) return volDiff;
+    return (num(b.attributes?.reserve_in_usd) ?? 0) - (num(a.attributes?.reserve_in_usd) ?? 0);
+  })[0] ?? null;
+}
+
+function pairScore(snapshot: MarketSnapshot | null): number {
+  if (!snapshot?.pairAddress || !isHexPool(snapshot.pairAddress)) return -1;
+  return (snapshot.volume24h ?? 0) * 1_000 + (snapshot.liquidityUsd ?? 0);
 }
 
 export function geckoPoolUrl(pool: string): string {
@@ -82,14 +108,60 @@ export function isHexPool(address: string | null | undefined): boolean {
   return Boolean(address && /^0x[0-9a-fA-F]{1,64}$/.test(address) && !address.includes("-"));
 }
 
+/** Fixed Gecko pool for a token when configured (e.g. SLAY). */
+export function chartPoolForToken(tokenAddress: string): string | null {
+  const token = normalizeAddress(tokenAddress);
+  if (token === normalizeAddress(SLAY_TOKEN)) {
+    return normalizeAddress(SLAY_CHART_POOL);
+  }
+  return null;
+}
+
+export function resolveChartPair(tokenAddress: string, fallback?: string | null): string | null {
+  const override = chartPoolForToken(tokenAddress);
+  if (override) return override;
+  return fallback && isHexPool(fallback) ? normalizeAddress(fallback) : null;
+}
+
+export function geckoChartUrlForToken(tokenAddress: string, market?: MarketSnapshot | null): string {
+  const pool = chartPoolForToken(tokenAddress);
+  if (pool) return geckoPoolUrl(pool);
+  if (market?.pairUrl) return market.pairUrl;
+  return geckoTokenUrl(tokenAddress);
+}
+
+function applyChartPoolOverride(tokenAddress: string, market: MarketSnapshot | null): MarketSnapshot | null {
+  const pool = chartPoolForToken(tokenAddress);
+  if (!pool) return market;
+  if (!market) {
+    return {
+      priceUsd: null,
+      priceNative: null,
+      marketCap: null,
+      liquidityUsd: null,
+      volume24h: null,
+      change1h: null,
+      change24h: null,
+      pairAddress: pool,
+      pairUrl: geckoPoolUrl(pool),
+      quoteSymbol: null,
+      dexId: null,
+    };
+  }
+  return { ...market, pairAddress: pool, pairUrl: geckoPoolUrl(pool) };
+}
+
 async function fetchGeckoMarket(tokenAddress: string): Promise<MarketSnapshot | null> {
   const token = normalizeAddress(tokenAddress);
   const body = await fetchJson<GeckoTokenResponse>(
     `https://api.geckoterminal.com/api/v2/networks/${NETWORK}/tokens/${token}?include=top_pools`,
   );
   const attrs = body.data?.attributes;
-  const pool = geckoPoolAddress(body.data?.relationships?.top_pools?.data?.[0]?.id);
-  const topPool = body.included?.find((item) => item.type === "pool")?.attributes;
+  const bestPool = pickBestGeckoPool(body.included);
+  const pool =
+    poolAddressFromIncluded(bestPool ?? {}) ??
+    geckoPoolAddress(body.data?.relationships?.top_pools?.data?.[0]?.id);
+  const poolAttrs = bestPool?.attributes;
   const price = num(attrs?.price_usd);
   if (!price && !pool) return null;
 
@@ -97,11 +169,11 @@ async function fetchGeckoMarket(tokenAddress: string): Promise<MarketSnapshot | 
     priceUsd: price,
     priceNative: null,
     marketCap: num(attrs?.market_cap_usd) ?? num(attrs?.fdv_usd),
-    liquidityUsd: num(topPool?.reserve_in_usd) ?? num(attrs?.total_reserve_in_usd),
-    volume24h: num(topPool?.volume_usd?.h24) ?? num(attrs?.volume_usd?.h24),
-    change1h: num(topPool?.price_change_percentage?.h1),
-    change24h: num(topPool?.price_change_percentage?.h24),
-    pairAddress: pool ?? (topPool?.address ? normalizeAddress(topPool.address) : null),
+    liquidityUsd: num(poolAttrs?.reserve_in_usd) ?? num(attrs?.total_reserve_in_usd),
+    volume24h: num(poolAttrs?.volume_usd?.h24) ?? num(attrs?.volume_usd?.h24),
+    change1h: num(poolAttrs?.price_change_percentage?.h1),
+    change24h: num(poolAttrs?.price_change_percentage?.h24),
+    pairAddress: pool,
     pairUrl: pool ? geckoPoolUrl(pool) : geckoTokenUrl(token),
     quoteSymbol: null,
     dexId: "ekubo",
@@ -125,20 +197,27 @@ export async function getGeckoMarket(tokenAddress: string): Promise<MarketSnapsh
       geckoCooldownUntil = Date.now() + 20_000;
       console.warn("Gecko market rate-limited; cooling down 20s");
       if (hit) return hit.value;
-    } else {
-      console.warn("GeckoTerminal lookup failed:", error);
     }
-    marketCache.set(token, { at: Date.now(), value: hit?.value ?? null });
+    console.warn("GeckoTerminal lookup failed:", error);
+    marketCache.set(token, { at: Date.now(), value: null });
     return hit?.value ?? null;
   }
 }
 
-function mergeGeckoFirst(
+function mergeMarketSnapshots(
   gecko: MarketSnapshot | null,
   dex: MarketSnapshot | null,
 ): MarketSnapshot | null {
   if (!gecko) return dex;
   if (!dex) return gecko;
+
+  const geckoPairScore = pairScore(gecko);
+  const dexPairScore = pairScore(dex);
+  const bestPair =
+    dexPairScore > geckoPairScore && isHexPool(dex.pairAddress)
+      ? { pairAddress: dex.pairAddress, pairUrl: dex.pairUrl }
+      : { pairAddress: gecko.pairAddress, pairUrl: gecko.pairUrl || dex.pairUrl };
+
   return {
     ...gecko,
     priceUsd: gecko.priceUsd ?? dex.priceUsd,
@@ -147,17 +226,20 @@ function mergeGeckoFirst(
     volume24h: gecko.volume24h ?? dex.volume24h,
     change1h: gecko.change1h ?? dex.change1h,
     change24h: gecko.change24h ?? dex.change24h,
-    pairAddress: gecko.pairAddress ?? (isHexPool(dex.pairAddress) ? dex.pairAddress : null),
-    pairUrl: gecko.pairUrl || dex.pairUrl,
+    pairAddress: bestPair.pairAddress ?? (isHexPool(dex.pairAddress) ? dex.pairAddress : null),
+    pairUrl: bestPair.pairUrl || dex.pairUrl || gecko.pairUrl,
+    quoteSymbol: gecko.quoteSymbol ?? dex.quoteSymbol,
+    dexId: gecko.dexId ?? dex.dexId,
   };
 }
 
-/** GeckoTerminal first; DexScreener only if gecko has no usable snapshot. */
+/** GeckoTerminal + DexScreener; SLAY charts/links use the fixed pool from config. */
 export async function getMarketSnapshot(tokenAddress: string): Promise<MarketSnapshot | null> {
-  const gecko = await getGeckoMarket(tokenAddress);
-  if (gecko?.priceUsd) return gecko;
-  const dex = await getDexMarket(tokenAddress);
-  return mergeGeckoFirst(gecko, dex);
+  const [gecko, dex] = await Promise.all([
+    getGeckoMarket(tokenAddress),
+    getDexMarket(tokenAddress),
+  ]);
+  return applyChartPoolOverride(tokenAddress, mergeMarketSnapshots(gecko, dex));
 }
 
 const STABLES = new Set(["USDC", "USDT"]);
