@@ -305,7 +305,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       [
         `<b>${BOT_NAME}</b> is a Starknet helper for Telegram groups.`,
         "",
-        "Right now: live Ekubo buy alerts (price, chart, GIFs). More tools are coming.",
+        "Right now: live Ekubo buy alerts (price, GIFs). More tools are coming.",
         "",
         "Admins: open /start in the group, or DM me and paste the group ID (starts with -100).",
         "You must be a group admin either way. Alerts still post in the group.",
@@ -313,7 +313,6 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         "Tap Close or send /cancel to exit the panel. Members just watch the feed.",
         "",
         "<b>Step</b> = USD per emoji. $50 step and a $250 buy → 5 emojis.",
-        "<b>Chart</b> = candlesticks on the buy card. If a GIF is set, tap Chart / GIF to switch.",
         "<b>Price ping</b> = extra message when the token price moves by that percent.",
         "",
         "AVNU/Fibrous can split one swap across several pools. Those hops are merged into a single buy.",
@@ -380,20 +379,6 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       reply_markup: tokenKeyboard(token),
     });
     await ctx.answerCallbackQuery();
-  });
-
-  bot.callbackQuery(/^t:chart:(\d+)$/, async (ctx) => {
-    const groupId = await requireAdmin(ctx);
-    if (!groupId) return deny(ctx);
-    const current = getToken(Number(ctx.match![1]));
-    if (!current || current.chatId !== groupId) return ctx.answerCallbackQuery({ text: "Token not found" });
-    const token = updateToken(current.id, { chartEnabled: !current.chartEnabled });
-    if (!token) return ctx.answerCallbackQuery();
-    await ctx.editMessageText(tokenCardText(token), {
-      parse_mode: "HTML",
-      reply_markup: tokenKeyboard(token),
-    });
-    await ctx.answerCallbackQuery({ text: token.chartEnabled ? "Chart on" : "Chart off" });
   });
 
   bot.callbackQuery(/^t:min:(\d+)$/, async (ctx) => {

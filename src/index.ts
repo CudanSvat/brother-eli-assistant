@@ -4,7 +4,6 @@ import { openDb, bumpAthForAddress } from "./store/db.ts";
 import { registerAdmin } from "./bot/admin.ts";
 import { registerChartCommand } from "./bot/chart-cmd.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
-import { registerSlides } from "./bot/slides.ts";
 import { createProvider, EkuboListener } from "./indexer/listener.ts";
 
 async function main(): Promise<void> {
@@ -16,7 +15,6 @@ async function main(): Promise<void> {
 
   registerAdmin(bot, provider);
   registerChartCommand(bot);
-  registerSlides(bot);
   const onSwap = attachDispatcher(bot);
   const listener = new EkuboListener(provider, onSwap);
 

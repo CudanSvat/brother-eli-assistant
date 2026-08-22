@@ -75,8 +75,7 @@ You want it to say privacy is **disabled**. Then add the bot to the group.
 | --- | --- | --- |
 | Min USD | $100 | Swaps below this are ignored |
 | Emoji + step | 🟢 / $50 | Ladder length = USD / step |
-| GIF | none | Send a GIF in chat, or a URL. With chart on, tap Chart / GIF on the card |
-| Chart | on | 5m candlesticks on the buy card (Gecko button still opens the pool) |
+| GIF | none | Send a GIF in chat, or a URL. Posted on the buy alert |
 | Price alert | off | Extra ping on ±N% moves |
 
 Cap: **10 tokens per group**.

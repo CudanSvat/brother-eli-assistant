@@ -1,7 +1,6 @@
 import type { Bot } from "grammy";
 import { tokensByAddress, updateToken, bumpAthForAddress } from "../store/db.ts";
-import { getMarketSnapshot, getOhlcvForBuyCard, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
-import { renderChartPng } from "../chart/render.ts";
+import { getMarketSnapshot, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
 import { checkBuyAth } from "./ath.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
@@ -35,35 +34,7 @@ export function attachDispatcher(bot: Bot) {
       quotePrices.set(normalizeAddress(leg.address), legPrices[i] ?? null);
     });
 
-    const sampleValues = valueFromSwap(swap, tokens[0]!, market, quotePrices);
-    const spotPrice =
-      sampleValues.usdValue > 0 && sampleValues.tokenUnits > 0
-        ? sampleValues.usdValue / sampleValues.tokenUnits
-        : null;
-
-    let chartPng: Buffer | null = null;
-    const needsChart = tokens.some((token) => token.chartEnabled);
     const chartPair = resolveChartPair(swap.tokenAddress, tokens[0]?.pairAddress);
-    if (needsChart && chartPair) {
-      try {
-        const { candles, intervalLabel } = await getOhlcvForBuyCard(chartPair);
-        chartPng = renderChartPng(tokens[0]!.symbol, candles, {
-          quote: market?.quoteSymbol ?? "USD",
-          intervalLabel,
-          buyCard: true,
-          spot: spotPrice
-            ? { price: spotPrice, volumeUsd: sampleValues.usdValue, timeSec: Math.floor(Date.now() / 1000) }
-            : undefined,
-        });
-        if (!chartPng) {
-          console.warn(
-            `Buy-card chart skipped for ${tokens[0]!.symbol}: ${candles.length} candles (pair=${chartPair ?? "none"})`,
-          );
-        }
-      } catch (error) {
-        console.warn("Chart render failed:", error);
-      }
-    }
 
     for (const token of tokens) {
       if (swap.side !== "buy") continue;
@@ -109,7 +80,6 @@ export function attachDispatcher(bot: Bot) {
         caption: card.caption,
         links: card.links,
         gifUrl: card.gifUrl,
-        chartPng: token.chartEnabled && meetsMin ? chartPng : null,
       });
 
       if (meetsMin && market?.priceUsd && token.priceAlertPct != null && token.lastPriceUsd) {
@@ -125,7 +95,6 @@ export function attachDispatcher(bot: Bot) {
             caption: `<b>${token.symbol} price ${dir} ${move.toFixed(1)}%</b>\nNow ${formatTokenPrice(trackPrice)}`,
             links: card.links,
             gifUrl: null,
-            chartPng: token.chartEnabled ? chartPng : null,
           });
         }
       }

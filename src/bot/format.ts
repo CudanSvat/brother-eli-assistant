@@ -107,19 +107,12 @@ export interface AlertLinks {
   avnu: string;
 }
 
-export function alertKeyboard(
-  links: AlertLinks,
-  toggle?: { id: string; show: "chart" | "gif" },
-): InlineKeyboard {
-  const kb = new InlineKeyboard()
+export function alertKeyboard(links: AlertLinks): InlineKeyboard {
+  return new InlineKeyboard()
     .url("TX", links.tx)
     .url("Gecko Chart", links.gecko)
     .url("Ekubo", links.ekubo)
     .url("AVNU", links.avnu);
-  if (toggle) {
-    kb.row().text(toggle.show === "chart" ? "Chart" : "GIF", `s:${toggle.id}:${toggle.show === "chart" ? "c" : "g"}`);
-  }
-  return kb;
 }
 
 export function adminHomeText(
@@ -176,7 +169,6 @@ export function tokenCardText(token: TokenSettings): string {
     `Emoji: ${token.emoji}  ·  one extra every ${formatUsd(token.emojiStepUsd)}`,
     `GIF: ${token.gifUrl ? "set" : "none"}`,
     `ATH GIF: ${token.athGifUrl ? "set" : "none"}`,
-    `Chart: ${token.chartEnabled ? "on" : "off"}`,
     `Price ping: ${token.priceAlertPct != null ? `when price moves ±${token.priceAlertPct}%` : "off"}`,
   ].join("\n");
 }
@@ -203,7 +195,6 @@ export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
     .row()
     .text(token.gifUrl ? "Change GIF" : "Set GIF", `t:gif:${token.id}`)
     .text(token.athGifUrl ? "Change ATH GIF" : "Set ATH GIF", `t:agif:${token.id}`)
-    .text(token.chartEnabled ? "Chart: on" : "Chart: off", `t:chart:${token.id}`)
     .row()
     .text(
       token.priceAlertPct != null ? `Price ping ±${token.priceAlertPct}%` : "Price ping: off",
