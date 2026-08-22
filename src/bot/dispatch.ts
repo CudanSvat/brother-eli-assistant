@@ -1,6 +1,6 @@
 import type { Bot } from "grammy";
 import { tokensByAddress, updateToken } from "../store/db.ts";
-import { getMarketSnapshot, getOhlcv, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
+import { getMarketSnapshot, getOhlcvForBuyCard, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
 import { renderChartPng } from "../chart/render.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
@@ -45,9 +45,11 @@ export function attachDispatcher(bot: Bot) {
     const chartPair = resolveChartPair(swap.tokenAddress, tokens[0]?.pairAddress);
     if (needsChart && chartPair) {
       try {
-        const candles = await getOhlcv(chartPair);
+        const { candles, intervalLabel } = await getOhlcvForBuyCard(chartPair);
         chartPng = renderChartPng(tokens[0]!.symbol, candles, {
           quote: market?.quoteSymbol ?? "USD",
+          intervalLabel,
+          buyCard: true,
           spot: spotPrice
             ? { price: spotPrice, volumeUsd: sampleValues.usdValue, timeSec: Math.floor(Date.now() / 1000) }
             : undefined,

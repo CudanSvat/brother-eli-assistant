@@ -600,23 +600,54 @@ export interface OhlcvResult {
   window: ChartWindow;
 }
 
-/** Buy-card chart: short recent traded window from the shared series pack. */
-export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
-  if (!pairAddress || !isHexPool(pairAddress)) return [];
+/** Buy-card chart: last 24h, prefer hourly bars for even spacing. */
+export async function getOhlcvForBuyCard(
+  pairAddress: string | null | undefined,
+): Promise<{ candles: Candle[]; intervalLabel: string }> {
+  if (!pairAddress || !isHexPool(pairAddress)) {
+    return { candles: [], intervalLabel: "1h" };
+  }
+
   const key = `${pairAddress.toLowerCase()}:buycard`;
   const hit = ohlcvCache.get(key);
-  if (hit && Date.now() - hit.at < BUYCARD_CACHE_MS) return hit.candles;
+  if (hit && Date.now() - hit.at < BUYCARD_CACHE_MS) {
+    return { candles: hit.candles, intervalLabel: hit.label };
+  }
 
   try {
     const pack = await loadSeriesPack(pairAddress, "1d");
-    const candles =
-      pack.mid.length >= 8 ? pack.mid.slice(-64) : pack.hour.length >= 8 ? pack.hour.slice(-48) : pack.fine.slice(-72);
-    ohlcvCache.set(key, { at: Date.now(), candles, label: pack.mid.length ? "15m" : "1h" });
-    return candles;
+    const cutoff = Math.floor((Date.now() - 24 * 3_600_000) / 1000);
+    const hasVolume = (c: Candle) => (c.volume ?? 0) > 0;
+    const inWindow = (c: Candle) => candleSec(c) >= cutoff;
+
+    let series = pack.hour.filter(inWindow).filter(hasVolume);
+    let label = "1h";
+    if (series.length < 4) {
+      series = pack.mid.filter(inWindow).filter(hasVolume);
+      label = "15m";
+    }
+    if (series.length < 4) {
+      series = pack.hour.filter(hasVolume).slice(-24);
+      label = "1h";
+    }
+    if (series.length < 2) {
+      series = pack.mid.filter(hasVolume).slice(-32);
+      label = "15m";
+    }
+
+    const candles = series.slice(-24);
+    ohlcvCache.set(key, { at: Date.now(), candles, label });
+    return { candles, intervalLabel: label };
   } catch {
-    ohlcvCache.set(key, { at: Date.now(), candles: [], label: "15m" });
-    return [];
+    ohlcvCache.set(key, { at: Date.now(), candles: [], label: "1h" });
+    return { candles: [], intervalLabel: "1h" };
   }
+}
+
+/** @deprecated Use getOhlcvForBuyCard */
+export async function getOhlcv(pairAddress: string | null | undefined): Promise<Candle[]> {
+  const { candles } = await getOhlcvForBuyCard(pairAddress);
+  return candles;
 }
 
 export async function getOhlcvForWindow(

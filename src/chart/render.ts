@@ -40,6 +40,8 @@ export interface ChartRenderOptions {
    * continuous series so longer windows stay readable.
    */
   keepEmpty?: boolean;
+  /** Compact chart on buy alerts — 24h hourly, capped wicks, no gap dashes. */
+  buyCard?: boolean;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -276,6 +278,21 @@ function applySpot(
 
   if (nowSec * 1000 >= candleMs(last.time)) {
     const open = last.close;
+    const jump = spot.price / Math.max(open, 1e-18);
+    // Stale OHLCV — update the last bar instead of drawing a full-height jump candle.
+    if (jump > 1.08 || jump < 1 / 1.08) {
+      return [
+        ...candles.slice(0, -1),
+        {
+          time: last.time,
+          open: last.open,
+          high: Math.max(last.high, spot.price, open),
+          low: Math.min(last.low, spot.price, open),
+          close: spot.price,
+          volume: (last.volume || 0) + vol,
+        },
+      ];
+    }
     return [
       ...candles,
       {
@@ -290,6 +307,24 @@ function applySpot(
   }
 
   return candles;
+}
+
+function sanitizeBuyCardWicks(candles: Candle[]): Candle[] {
+  return candles.map((c) => {
+    const top = Math.max(c.open, c.close);
+    const bot = Math.min(c.open, c.close);
+    const body = Math.max(top - bot, top * 0.003);
+    const maxWick = body * 1.5 + top * 0.012;
+    return {
+      ...c,
+      high: Math.min(c.high, top + maxWick),
+      low: Math.max(c.low, bot - maxWick),
+    };
+  });
+}
+
+function priceWindowBuyCard(candles: Candle[]): { min: number; max: number } {
+  return priceWindow(sanitizeBuyCardWicks(candles));
 }
 
 function priceWindow(candles: Candle[]): { min: number; max: number } {
@@ -334,6 +369,7 @@ export function renderChartPng(
   const stamped = options.spot ? applySpot(raw, options.spot) : raw;
   const { candles, skippedEmpty, intervalMs } = selectPlotCandles(stamped, options.keepEmpty === true);
   if (candles.length < 2) return null;
+  const plotCandles = options.buyCard ? sanitizeBuyCardWicks(candles) : candles;
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext("2d");
@@ -359,13 +395,13 @@ export function renderChartPng(
   roundRect(ctx, plotX, volY, plotW, volH, 6);
   ctx.fill();
 
-  const { min, max } = priceWindow(candles);
+  const { min, max } = options.buyCard ? priceWindowBuyCard(candles) : priceWindow(candles);
   const span = max - min || 1;
-  const volumes = candles.map((c) => c.volume || 0).sort((a, b) => a - b);
+  const volumes = plotCandles.map((c) => c.volume || 0).sort((a, b) => a - b);
   const trueMaxVol = volumes[volumes.length - 1] ?? 0;
   const volScale = Math.max(percentile(volumes, 90) || trueMaxVol, trueMaxVol * 0.15, 1);
   const inner = 8;
-  const slot = (plotW - inner * 2) / candles.length;
+  const slot = (plotW - inner * 2) / plotCandles.length;
   const bodyW = Math.max(4, Math.min(18, slot * 0.72));
 
   const yFor = (price: number) => {
@@ -394,8 +430,8 @@ export function renderChartPng(
   ctx.strokeRect(plotX + 0.5, plotY + 0.5, plotW - 1, plotH - 1);
   ctx.strokeRect(plotX + 0.5, volY + 0.5, plotW - 1, volH - 1);
 
-  const last = candles[candles.length - 1]!;
-  const first = candles[0]!;
+  const last = plotCandles[plotCandles.length - 1]!;
+  const first = plotCandles[0]!;
   const lastUp = last.close >= last.open;
   const lastY = yFor(last.close);
 
@@ -409,7 +445,7 @@ export function renderChartPng(
   ctx.setLineDash([]);
 
   if (trueMaxVol > 0) {
-    candles.forEach((candle, i) => {
+    plotCandles.forEach((candle, i) => {
       const vol = candle.volume || 0;
       if (vol <= 0) return;
       const x = xFor(i);
@@ -420,26 +456,28 @@ export function renderChartPng(
     });
   }
 
-  for (let i = 1; i < candles.length; i++) {
-    const prev = candles[i - 1]!;
-    const next = candles[i]!;
-    const gapMs = candleMs(next.time) - candleMs(prev.time);
-    if (gapMs <= intervalMs * 1.6) continue;
-    const x0 = xFor(i - 1) + bodyW / 2 + 1;
-    const x1 = xFor(i) - bodyW / 2 - 1;
-    if (x1 - x0 < 8) continue;
-    const up = prev.close >= prev.open;
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = up ? "rgba(34, 197, 94, 0.55)" : "rgba(239, 68, 68, 0.55)";
-    ctx.lineWidth = 1.15;
-    ctx.beginPath();
-    ctx.moveTo(x0, yFor(prev.close));
-    ctx.lineTo(x1, yFor(next.open));
-    ctx.stroke();
-    ctx.setLineDash([]);
+  if (!options.buyCard) {
+    for (let i = 1; i < plotCandles.length; i++) {
+      const prev = plotCandles[i - 1]!;
+      const next = plotCandles[i]!;
+      const gapMs = candleMs(next.time) - candleMs(prev.time);
+      if (gapMs <= intervalMs * 1.6) continue;
+      const x0 = xFor(i - 1) + bodyW / 2 + 1;
+      const x1 = xFor(i) - bodyW / 2 - 1;
+      if (x1 - x0 < 8) continue;
+      const up = prev.close >= prev.open;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = up ? "rgba(34, 197, 94, 0.55)" : "rgba(239, 68, 68, 0.55)";
+      ctx.lineWidth = 1.15;
+      ctx.beginPath();
+      ctx.moveTo(x0, yFor(prev.close));
+      ctx.lineTo(x1, yFor(next.open));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
-  candles.forEach((candle, i) => {
+  plotCandles.forEach((candle, i) => {
     const x = xFor(i);
     const up = candle.close >= candle.open;
     const color = up ? C.up : C.down;
@@ -485,11 +523,13 @@ export function renderChartPng(
 
   const change = first.open > 0 ? ((last.close - first.open) / first.open) * 100 : 0;
   const up = change >= 0;
-  const visibleHigh = Math.max(...candles.map((c) => c.high));
-  const visibleLow = Math.min(...candles.map((c) => c.low));
+  const visibleHigh = Math.max(...plotCandles.map((c) => c.high));
+  const visibleLow = Math.min(...plotCandles.map((c) => c.low));
   const tf = options.intervalLabel?.trim() || intervalLabelFromMs(intervalMs);
-  const subtitleParts = [`${tf} · ${windowLabel(first, last)}`];
-  if (skippedEmpty) subtitleParts.push("empty periods skipped");
+  const subtitleParts = options.buyCard
+    ? [`${tf} · last 24h`]
+    : [`${tf} · ${windowLabel(first, last)}`];
+  if (!options.buyCard && skippedEmpty) subtitleParts.push("empty periods skipped");
 
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
