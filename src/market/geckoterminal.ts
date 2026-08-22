@@ -492,6 +492,19 @@ async function fetchDayHistory(pool: string): Promise<Candle[]> {
   return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
+/** Highest daily high from the pinned pool (~180d on the public API). */
+export async function getPoolAthUsd(pairAddress: string | null | undefined): Promise<number | null> {
+  if (!pairAddress || !isHexPool(pairAddress)) return null;
+  try {
+    const days = await fetchDayHistory(pairAddress);
+    if (!days.length) return null;
+    const ath = Math.max(...days.map((c) => c.high));
+    return Number.isFinite(ath) && ath > 0 ? ath : null;
+  } catch {
+    return null;
+  }
+}
+
 /** At most one warm-up in flight per pool. Preferred series loads first for fast /chart. */
 async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<SeriesPack> {
   const key = pool.toLowerCase();

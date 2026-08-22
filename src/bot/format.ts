@@ -22,6 +22,8 @@ export interface AlertPayload {
   tokenUnits: number;
   quoteUnits: number;
   quoteSymbol: string;
+  newAth?: boolean;
+  previousAth?: number | null;
 }
 
 export function buildAlert(input: AlertPayload): {
@@ -29,7 +31,7 @@ export function buildAlert(input: AlertPayload): {
   gifUrl: string | null;
   links: AlertLinks;
 } {
-  const { token, swap, market, usdValue, tokenUnits } = input;
+  const { token, swap, market, usdValue, tokenUnits, newAth, previousAth } = input;
   const emoji = token.emoji;
   const step = Math.max(1, token.emojiStepUsd);
   const count = Math.min(50, Math.max(1, Math.round(usdValue / step)));
@@ -42,7 +44,9 @@ export function buildAlert(input: AlertPayload): {
       ? ((trackedPrice - prevPrice) / prevPrice) * 100
       : null;
   const moveText = move != null && Number.isFinite(move) && move !== 0 ? formatPct(move) : "";
-  const title = `${escapeHtml(token.symbol)} Buy!`;
+  const title = newAth
+    ? `${escapeHtml(token.symbol)} Buy! 🏆 NEW ATH`
+    : `${escapeHtml(token.symbol)} Buy!`;
 
   const spentUsd = `Spent: ${formatUsd(usdValue)}`;
   const paidLines = (swap.paidLegs.length ? swap.paidLegs : [{ address: swap.quoteAddress, amount: swap.quoteAmount }])
@@ -67,6 +71,11 @@ export function buildAlert(input: AlertPayload): {
           moveText ? `  (${moveText} vs prev)` : ""
         }`
       : `Price: —`,
+    newAth && trackedPrice
+      ? `🏆 ATH ${formatTokenPrice(trackedPrice)}${
+          previousAth ? ` · prev ${formatTokenPrice(previousAth)}` : ""
+        }`
+      : "",
     `MC ${formatUsd(market?.marketCap)} · Liq ${formatUsd(market?.liquidityUsd)} · Vol ${formatUsd(market?.volume24h)}`,
   ].filter((line) => line !== "");
 

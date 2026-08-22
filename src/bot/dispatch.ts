@@ -1,7 +1,8 @@
 import type { Bot } from "grammy";
-import { tokensByAddress, updateToken } from "../store/db.ts";
+import { tokensByAddress, updateToken, bumpAthForAddress } from "../store/db.ts";
 import { getMarketSnapshot, getOhlcvForBuyCard, getQuotePriceUsd, resolveChartPair } from "../market/geckoterminal.ts";
 import { renderChartPng } from "../chart/render.ts";
+import { checkBuyAth } from "./ath.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
 import { enqueueAlert } from "./queue.ts";
@@ -74,8 +75,16 @@ export function attachDispatcher(bot: Bot) {
         );
         continue;
       }
+      const execPrice =
+        values.usdValue > 0 && values.tokenUnits > 0 ? values.usdValue / values.tokenUnits : null;
+      const athCheck = await checkBuyAth(
+        token,
+        chartPair ?? resolveChartPair(swap.tokenAddress, token.pairAddress),
+        execPrice,
+      );
+
       console.log(
-        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}`,
+        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${athCheck?.newAth ? " NEW_ATH" : ""}`,
       );
 
       const postKey = `${token.chatId}:${swap.transactionHash}:${swap.tokenAddress}:buy`;
@@ -88,6 +97,8 @@ export function attachDispatcher(bot: Bot) {
         swap,
         market,
         ...values,
+        newAth: athCheck?.newAth,
+        previousAth: athCheck?.previousAth,
       });
 
       enqueueAlert(bot.api, {
@@ -116,15 +127,16 @@ export function attachDispatcher(bot: Bot) {
         }
       }
 
-      const trackPrice =
-        values.usdValue > 0 && values.tokenUnits > 0
-          ? values.usdValue / values.tokenUnits
-          : market?.priceUsd ?? null;
+      const trackPrice = execPrice ?? market?.priceUsd ?? null;
       if (trackPrice) {
         updateToken(token.id, {
           lastPriceUsd: trackPrice,
           pairAddress: resolveChartPair(swap.tokenAddress, market?.pairAddress ?? token.pairAddress),
+          athPriceUsd: athCheck?.nextAth ?? token.athPriceUsd,
         });
+        if (athCheck?.nextAth) {
+          bumpAthForAddress(swap.tokenAddress, athCheck.nextAth);
+        }
       }
     }
   }

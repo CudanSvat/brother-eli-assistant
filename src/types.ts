@@ -18,6 +18,7 @@ export interface TokenSettings {
   chartEnabled: boolean;
   priceAlertPct: number | null;
   lastPriceUsd: number | null;
+  athPriceUsd: number | null;
 }
 
 export interface SignedAmount {

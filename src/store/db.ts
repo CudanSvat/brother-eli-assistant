@@ -28,6 +28,7 @@ interface TokenRow {
   alert_sells: number;
   price_alert_pct: number | null;
   last_price_usd: number | null;
+  ath_price_usd: number | null;
 }
 
 function mapToken(row: TokenRow): TokenSettings {
@@ -49,6 +50,7 @@ function mapToken(row: TokenRow): TokenSettings {
     chartEnabled: Boolean(row.chart_enabled),
     priceAlertPct: row.price_alert_pct,
     lastPriceUsd: row.last_price_usd,
+    athPriceUsd: row.ath_price_usd,
   };
 }
 
@@ -101,6 +103,9 @@ export function openDb(): Database.Database {
   const cols = db.pragma("table_info(tokens)") as { name: string }[];
   if (!cols.some((col) => col.name === "whale_usd")) {
     db.exec("ALTER TABLE tokens ADD COLUMN whale_usd REAL NOT NULL DEFAULT 500");
+  }
+  if (!cols.some((col) => col.name === "ath_price_usd")) {
+    db.exec("ALTER TABLE tokens ADD COLUMN ath_price_usd REAL");
   }
   return db;
 }
@@ -232,6 +237,7 @@ export function updateToken(
     chartEnabled: boolean;
     priceAlertPct: number | null;
     lastPriceUsd: number | null;
+    athPriceUsd: number | null;
     pairAddress: string | null;
     quoteAddress: string | null;
   }>,
@@ -251,6 +257,7 @@ export function updateToken(
          chart_enabled = @chartEnabled,
          price_alert_pct = @priceAlertPct,
          last_price_usd = @lastPriceUsd,
+         ath_price_usd = @athPriceUsd,
          pair_address = @pairAddress,
          quote_address = @quoteAddress
        WHERE id = @id`,
@@ -266,8 +273,20 @@ export function updateToken(
       chartEnabled: next.chartEnabled ? 1 : 0,
       priceAlertPct: next.priceAlertPct,
       lastPriceUsd: next.lastPriceUsd,
+      athPriceUsd: next.athPriceUsd,
       pairAddress: next.pairAddress,
       quoteAddress: next.quoteAddress,
     });
   return getToken(id);
+}
+
+/** Keep ATH in sync for every group tracking the same token. */
+export function bumpAthForAddress(address: string, athPriceUsd: number): void {
+  if (!Number.isFinite(athPriceUsd) || athPriceUsd <= 0) return;
+  openDb()
+    .prepare(
+      `UPDATE tokens SET ath_price_usd = @ath
+       WHERE address = @address AND (ath_price_usd IS NULL OR ath_price_usd < @ath)`,
+    )
+    .run({ address: normalizeAddress(address), ath: athPriceUsd });
 }
