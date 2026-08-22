@@ -4,7 +4,9 @@ import { BOT_NAME, config } from "../config.ts";
 import {
   clearDmSession,
   countTokens,
+  deleteGroup,
   deleteToken,
+  clearDmSessionsForGroup,
   getDmSession,
   getGroup,
   getToken,
@@ -137,12 +139,32 @@ async function showHome(ctx: Context, groupId: number, edit = false): Promise<vo
   await ctx.reply(text, { parse_mode: "HTML", reply_markup: markup });
 }
 
+async function listReachableGroups(ctx: Context): Promise<{ chatId: number; title: string | null }[]> {
+  if (!ctx.me) return [];
+  const active: { chatId: number; title: string | null }[] = [];
+  for (const group of listGroups()) {
+    try {
+      const member = await ctx.api.getChatMember(group.chatId, ctx.me.id);
+      if (member.status === "left" || member.status === "kicked") {
+        deleteGroup(group.chatId);
+        clearDmSessionsForGroup(group.chatId);
+        continue;
+      }
+      active.push(group);
+    } catch {
+      deleteGroup(group.chatId);
+      clearDmSessionsForGroup(group.chatId);
+    }
+  }
+  return active;
+}
+
 async function showConnect(ctx: Context, edit = false): Promise<void> {
   if (ctx.from) {
     pending.set(pendingKey(ctx.from.id, ctx.chat!.id), { kind: "connect_group" });
   }
   const text = connectGroupText();
-  const markup = connectGroupKeyboard(listGroups());
+  const markup = connectGroupKeyboard(await listReachableGroups(ctx));
   if (edit && ctx.callbackQuery?.message) {
     try {
       await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: markup });
@@ -215,7 +237,9 @@ async function tryConnect(ctx: Context, groupId: number, edit = false): Promise<
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery({ text: result.reason });
     } else {
-      await ctx.reply(result.reason, { reply_markup: connectGroupKeyboard(listGroups()) });
+      await ctx.reply(result.reason, {
+        reply_markup: connectGroupKeyboard(await listReachableGroups(ctx)),
+      });
     }
     return false;
   }
@@ -230,6 +254,11 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     const chat = ctx.chat;
     if (!chat || chat.type === "private") return;
     const status = ctx.myChatMember.new_chat_member.status;
+    if (status === "left" || status === "kicked") {
+      deleteGroup(chat.id);
+      clearDmSessionsForGroup(chat.id);
+      return;
+    }
     if (status === "member" || status === "administrator") {
       upsertGroup(chat.id, "title" in chat ? chat.title : undefined);
     }
@@ -240,11 +269,14 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     clearPending(ctx);
     if (isPrivate(ctx)) {
       const saved = getDmSession(ctx.from.id);
-      if (saved && (await userIsGroupAdmin(ctx, saved))) {
-        await showHome(ctx, saved);
-        return;
+      if (saved) {
+        const connected = await connectToGroup(ctx, saved);
+        if (connected.ok) {
+          await showHome(ctx, saved);
+          return;
+        }
+        clearDmSession(ctx.from.id);
       }
-      if (saved) clearDmSession(ctx.from.id);
       await showConnect(ctx);
       return;
     }
@@ -575,7 +607,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       if (!groupId) {
         await ctx.reply(
           "Send a numeric group ID (starts with -100), or forward a message from the group.",
-          { reply_markup: connectGroupKeyboard(listGroups()) },
+          { reply_markup: connectGroupKeyboard(await listReachableGroups(ctx)) },
         );
         return;
       }

@@ -132,6 +132,14 @@ export function getGroup(chatId: number): { chatId: number; title: string | null
   return row ? { chatId: row.chat_id, title: row.title } : undefined;
 }
 
+export function deleteGroup(chatId: number): void {
+  openDb().prepare("DELETE FROM groups WHERE chat_id = ?").run(chatId);
+}
+
+export function clearDmSessionsForGroup(chatId: number): void {
+  openDb().prepare("DELETE FROM dm_sessions WHERE chat_id = ?").run(chatId);
+}
+
 export function listGroups(): { chatId: number; title: string | null }[] {
   const rows = openDb()
     .prepare("SELECT chat_id, title FROM groups ORDER BY created_at DESC")
