@@ -167,6 +167,7 @@ export function tokenCardText(token: TokenSettings): string {
     `Emoji: ${token.emoji}  ·  one extra every ${formatUsd(token.emojiStepUsd)}`,
     `GIF: ${token.gifUrl ? "set" : "none"}`,
     `ATH GIF: ${token.athGifUrl ? "set" : "none"}`,
+    `ATH: ${athSettingText(token)}`,
     `Price ping: ${token.priceAlertPct != null ? `when price moves ±${token.priceAlertPct}%` : "off"}`,
   ].join("\n");
 }
@@ -185,6 +186,18 @@ export function homeKeyboard(tokens: TokenSettings[], dm = false): InlineKeyboar
   return kb;
 }
 
+export function athSettingText(token: TokenSettings): string {
+  if (token.athMinUsd == null) return "off";
+  if (token.athMinUsd <= 0) return "any size";
+  return `min ${formatUsd(token.athMinUsd)}`;
+}
+
+export function athSettingButton(token: TokenSettings): string {
+  if (token.athMinUsd == null) return "ATH: off";
+  if (token.athMinUsd <= 0) return "ATH any size";
+  return `ATH min ${formatUsd(token.athMinUsd)}`;
+}
+
 export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
   return new InlineKeyboard()
     .text(`Min ${formatUsd(token.minUsd)}`, `t:min:${token.id}`)
@@ -194,10 +207,12 @@ export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
     .text(token.gifUrl ? "Change GIF" : "Set GIF", `t:gif:${token.id}`)
     .text(token.athGifUrl ? "Change ATH GIF" : "Set ATH GIF", `t:agif:${token.id}`)
     .row()
+    .text(athSettingButton(token), `t:ath:${token.id}`)
     .text(
       token.priceAlertPct != null ? `Price ping ±${token.priceAlertPct}%` : "Price ping: off",
       `t:price:${token.id}`,
     )
+    .row()
     .text("Remove", `t:del:${token.id}`)
     .row()
     .text("« Back", "t:home")

@@ -7,7 +7,7 @@ import {
   resolveChartPair,
 } from "../market/geckoterminal.ts";
 import { usdFromSqrtRatio } from "../market/pool-price.ts";
-import { checkBuyAth } from "./ath.ts";
+import { checkBuyAth, shouldAnnounceAth } from "./ath.ts";
 import { buildAlert, valueFromSwap } from "./format.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress, shortAddress } from "../lib/format.ts";
 import { enqueueAlert } from "./queue.ts";
@@ -77,18 +77,24 @@ export function attachDispatcher(bot: Bot) {
         chartPair ?? resolveChartPair(swap.tokenAddress, token.pairAddress),
         chartUsd,
       );
-      const newAth = athCheck?.newAth ?? false;
+      const priceHitAth = athCheck?.newAth ?? false;
+      const announceAth = shouldAnnounceAth(token, values.usdValue, priceHitAth);
       const meetsMin = values.usdValue >= token.minUsd;
 
-      if (!meetsMin && !newAth) {
+      // Keep the high-water mark even when we don't post an ATH card.
+      if (priceHitAth && athCheck?.nextAth) {
+        bumpAthForAddress(swap.tokenAddress, athCheck.nextAth);
+      }
+
+      if (!meetsMin && !announceAth) {
         console.log(
-          `Skip ${token.symbol} buy ${formatUsd(values.usdValue)} < min ${formatUsd(token.minUsd)} tx ${shortAddress(swap.transactionHash)}`,
+          `Skip ${token.symbol} buy ${formatUsd(values.usdValue)} < min ${formatUsd(token.minUsd)} tx ${shortAddress(swap.transactionHash)}${priceHitAth && !announceAth ? " ATH quiet" : ""}`,
         );
         continue;
       }
 
       console.log(
-        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${newAth ? " NEW_ATH" : ""}${!meetsMin && newAth ? " (below min)" : ""} spot=${spotPrice != null ? formatTokenPrice(spotPrice) : "—"} fill=${execPrice != null ? formatTokenPrice(execPrice) : "—"}`,
+        `Post ${token.symbol} buy ${formatUsd(values.usdValue)} hops=${swap.hopCount} tx ${swap.transactionHash}${announceAth ? " NEW_ATH" : ""}${!meetsMin && announceAth ? " (below min)" : ""} spot=${spotPrice != null ? formatTokenPrice(spotPrice) : "—"} fill=${execPrice != null ? formatTokenPrice(execPrice) : "—"}`,
       );
 
       const postKey = `${token.chatId}:${swap.transactionHash}:${swap.tokenAddress}:buy`;
@@ -103,7 +109,7 @@ export function attachDispatcher(bot: Bot) {
         market,
         ...values,
         spotPrice,
-        newAth: athCheck?.newAth,
+        newAth: announceAth,
         previousAth: athCheck?.previousAth,
       });
 
@@ -134,9 +140,6 @@ export function attachDispatcher(bot: Bot) {
           pairAddress: resolveChartPair(swap.tokenAddress, market?.pairAddress ?? token.pairAddress),
           athPriceUsd: athCheck?.nextAth ?? token.athPriceUsd,
         });
-        if (athCheck?.newAth && athCheck.nextAth) {
-          bumpAthForAddress(swap.tokenAddress, athCheck.nextAth);
-        }
       }
     }
   }

@@ -30,6 +30,7 @@ interface TokenRow {
   price_alert_pct: number | null;
   last_price_usd: number | null;
   ath_price_usd: number | null;
+  ath_min_usd: number | null;
 }
 
 function mapToken(row: TokenRow): TokenSettings {
@@ -53,6 +54,7 @@ function mapToken(row: TokenRow): TokenSettings {
     priceAlertPct: row.price_alert_pct,
     lastPriceUsd: row.last_price_usd,
     athPriceUsd: row.ath_price_usd,
+    athMinUsd: row.ath_min_usd,
   };
 }
 
@@ -90,6 +92,7 @@ export function openDb(): Database.Database {
       alert_sells INTEGER NOT NULL DEFAULT 0,
       price_alert_pct REAL,
       last_price_usd REAL,
+      ath_min_usd REAL DEFAULT 0,
       created_at INTEGER NOT NULL,
       UNIQUE(chat_id, address)
     );
@@ -121,6 +124,9 @@ export function openDb(): Database.Database {
   }
   if (!cols.some((col) => col.name === "ath_gif_url")) {
     db.exec("ALTER TABLE tokens ADD COLUMN ath_gif_url TEXT");
+  }
+  if (!cols.some((col) => col.name === "ath_min_usd")) {
+    db.exec("ALTER TABLE tokens ADD COLUMN ath_min_usd REAL DEFAULT 0");
   }
   return db;
 }
@@ -265,6 +271,7 @@ export function updateToken(
     priceAlertPct: number | null;
     lastPriceUsd: number | null;
     athPriceUsd: number | null;
+    athMinUsd: number | null;
     pairAddress: string | null;
     quoteAddress: string | null;
   }>,
@@ -286,6 +293,7 @@ export function updateToken(
          price_alert_pct = @priceAlertPct,
          last_price_usd = @lastPriceUsd,
          ath_price_usd = @athPriceUsd,
+         ath_min_usd = @athMinUsd,
          pair_address = @pairAddress,
          quote_address = @quoteAddress
        WHERE id = @id`,
@@ -303,6 +311,7 @@ export function updateToken(
       priceAlertPct: next.priceAlertPct,
       lastPriceUsd: next.lastPriceUsd,
       athPriceUsd: next.athPriceUsd,
+      athMinUsd: next.athMinUsd,
       pairAddress: next.pairAddress,
       quoteAddress: next.quoteAddress,
     });

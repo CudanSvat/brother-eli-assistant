@@ -20,6 +20,8 @@ export interface TokenSettings {
   priceAlertPct: number | null;
   lastPriceUsd: number | null;
   athPriceUsd: number | null;
+  /** null = ATH alerts off; 0 = any size; N = announce ATH only if buy >= N USD. */
+  athMinUsd: number | null;
 }
 
 export interface SignedAmount {
@@ -105,5 +107,6 @@ export type PendingAction =
   | { kind: "set_gif"; chatId: number; tokenId: number }
   | { kind: "set_whale_gif"; chatId: number; tokenId: number }
   | { kind: "set_ath_gif"; chatId: number; tokenId: number }
+  | { kind: "set_ath_min"; chatId: number; tokenId: number }
   | { kind: "set_whale_usd"; chatId: number; tokenId: number }
   | { kind: "set_price_pct"; chatId: number; tokenId: number };

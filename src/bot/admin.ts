@@ -314,6 +314,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         "",
         "<b>Step</b> = USD per emoji. $50 step and a $250 buy → 5 emojis.",
         "<b>Price ping</b> = extra message when the token price moves by that percent.",
+        "<b>ATH</b> = NEW ATH badge and GIF. Off, any size, or a USD floor so tiny buys don't spam it.",
         "",
         "AVNU/Fibrous can split one swap across several pools. Those hops are merged into a single buy.",
       ].join("\n"),
@@ -440,7 +441,28 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     await ctx.answerCallbackQuery();
     await ask(
       ctx,
-      "Send the NEW ATH GIF in this chat (or an mp4 / URL). Send none to clear.\nIt plays when a buy hits a new all-time high.",
+      "Send the NEW ATH GIF in this chat (or an mp4 / URL). Send none to clear.\nIt plays when a buy is announced as a new all-time high.",
+    );
+  });
+
+  bot.callbackQuery(/^t:ath:(\d+)$/, async (ctx) => {
+    const groupId = await requireAdmin(ctx);
+    if (!groupId) return deny(ctx);
+    pending.set(pendingKey(ctx.from!.id, ctx.chat!.id), {
+      kind: "set_ath_min",
+      chatId: groupId,
+      tokenId: Number(ctx.match![1]),
+    });
+    await ctx.answerCallbackQuery();
+    await ask(
+      ctx,
+      [
+        "Send the smallest buy that can announce a NEW ATH, in USD.",
+        "Example: 500 — only $500+ buys get the ATH badge and GIF. Smaller buys still post if they meet Min buy, but without ATH.",
+        "",
+        "Send 0 to announce ATH on any buy size (even below Min buy).",
+        "Send off to turn ATH announcements off.",
+      ].join("\n"),
     );
   });
 
@@ -659,6 +681,23 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         return;
       }
       const nextToken = updateToken(token.id, { minUsd: value });
+      await ctx.reply(tokenCardText(nextToken!), { parse_mode: "HTML", reply_markup: tokenKeyboard(nextToken!) });
+      return;
+    }
+
+    if (action.kind === "set_ath_min") {
+      if (/^(off|none|clear|-)$/i.test(text)) {
+        const nextToken = updateToken(token.id, { athMinUsd: null });
+        await ctx.reply(tokenCardText(nextToken!), { parse_mode: "HTML", reply_markup: tokenKeyboard(nextToken!) });
+        return;
+      }
+      const value = Number(text.replace(/[$,]/g, ""));
+      if (!Number.isFinite(value) || value < 0) {
+        pending.set(key, action);
+        await ctx.reply("Send a USD amount, 0, or off — or tap Cancel.", { reply_markup: cancelKeyboard() });
+        return;
+      }
+      const nextToken = updateToken(token.id, { athMinUsd: value });
       await ctx.reply(tokenCardText(nextToken!), { parse_mode: "HTML", reply_markup: tokenKeyboard(nextToken!) });
       return;
     }

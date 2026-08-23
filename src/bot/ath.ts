@@ -60,3 +60,14 @@ export async function checkBuyAth(
     previousAth,
   };
 }
+
+/** Whether this buy should get the ATH badge/GIF and may bypass the regular min. */
+export function shouldAnnounceAth(
+  token: TokenSettings,
+  usdValue: number,
+  priceHitAth: boolean,
+): boolean {
+  if (!priceHitAth) return false;
+  if (token.athMinUsd == null) return false;
+  return usdValue >= token.athMinUsd;
+}
