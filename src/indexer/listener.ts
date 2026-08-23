@@ -1,6 +1,6 @@
 import { RpcProvider, WebSocketChannel } from "starknet";
 import { config, EKUBO_CORE, SWAPPED_SELECTOR } from "../config.ts";
-import { allTrackedAddresses } from "../store/db.ts";
+import { allTrackedAddresses, getMeta, setMeta } from "../store/db.ts";
 import { decodeSwapped } from "./decode.ts";
 import { netTransaction } from "./classify.ts";
 import { normalizeAddress, sleep } from "../lib/format.ts";
@@ -30,6 +30,7 @@ export class EkuboListener {
   private lastBlock = 0;
   private running = false;
   private seen = new Set<string>();
+  private flushed = new Set<string>();
 
   constructor(
     private readonly http: RpcProvider,
@@ -39,7 +40,9 @@ export class EkuboListener {
   async start(): Promise<void> {
     this.running = true;
     const latest = await this.http.getBlockNumber();
-    this.lastBlock = Math.max(0, latest - 30);
+    const saved = Number(getMeta("last_block"));
+    this.lastBlock =
+      Number.isFinite(saved) && saved > 0 ? Math.min(saved, latest) : Math.max(0, latest - 2);
     console.log(`Indexer starting at block ${this.lastBlock} (latest ${latest})`);
 
     if (config.wsUrl) {
@@ -113,6 +116,7 @@ export class EkuboListener {
     } while (continuationToken);
 
     this.lastBlock = to;
+    setMeta("last_block", String(to));
   }
 
   private handleRawEvent(raw: Record<string, unknown>): void {
@@ -141,6 +145,7 @@ export class EkuboListener {
 
   private queueHop(swap: DecodedSwap): void {
     const key = swap.transactionHash;
+    if (this.flushed.has(key)) return;
     const existing = this.pending.get(key);
     if (existing) {
       existing.hops.push(swap);
@@ -160,6 +165,14 @@ export class EkuboListener {
   }
 
   private async flush(hops: DecodedSwap[]): Promise<void> {
+    const txHash = hops[0]?.transactionHash;
+    if (txHash) {
+      if (this.flushed.has(txHash)) return;
+      this.flushed.add(txHash);
+      if (this.flushed.size > 8_000) {
+        this.flushed = new Set([...this.flushed].slice(-4_000));
+      }
+    }
     const tracked = allTrackedAddresses();
     if (!tracked.length) return;
 

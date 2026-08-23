@@ -101,6 +101,16 @@ export function openDb(): Database.Database {
       chat_id INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS posted_alerts (
+      post_key TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL
+    );
   `);
   const cols = db.pragma("table_info(tokens)") as { name: string }[];
   if (!cols.some((col) => col.name === "whale_usd")) {
@@ -133,7 +143,10 @@ export function getGroup(chatId: number): { chatId: number; title: string | null
 }
 
 export function deleteGroup(chatId: number): void {
-  openDb().prepare("DELETE FROM groups WHERE chat_id = ?").run(chatId);
+  const sqlite = openDb();
+  sqlite.prepare("DELETE FROM tokens WHERE chat_id = ?").run(chatId);
+  sqlite.prepare("DELETE FROM groups WHERE chat_id = ?").run(chatId);
+  sqlite.prepare("DELETE FROM dm_sessions WHERE chat_id = ?").run(chatId);
 }
 
 export function clearDmSessionsForGroup(chatId: number): void {
@@ -313,4 +326,38 @@ export function setAthForAddress(address: string, athPriceUsd: number): void {
   openDb()
     .prepare(`UPDATE tokens SET ath_price_usd = @ath WHERE address = @address`)
     .run({ address: normalizeAddress(address), ath: athPriceUsd });
+}
+
+export function getMeta(key: string): string | null {
+  const row = openDb()
+    .prepare("SELECT value FROM meta WHERE key = ?")
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setMeta(key: string, value: string): void {
+  openDb()
+    .prepare(
+      `INSERT INTO meta (key, value) VALUES (@key, @value)
+       ON CONFLICT(key) DO UPDATE SET value = @value`,
+    )
+    .run({ key, value });
+}
+
+export function wasPosted(postKey: string): boolean {
+  const row = openDb()
+    .prepare("SELECT 1 FROM posted_alerts WHERE post_key = ?")
+    .get(postKey);
+  return Boolean(row);
+}
+
+export function markPosted(postKey: string): void {
+  const sqlite = openDb();
+  sqlite
+    .prepare(
+      `INSERT INTO posted_alerts (post_key, created_at) VALUES (@postKey, @createdAt)
+       ON CONFLICT(post_key) DO NOTHING`,
+    )
+    .run({ postKey, createdAt: Date.now() });
+  sqlite.prepare("DELETE FROM posted_alerts WHERE created_at < ?").run(Date.now() - 48 * 3_600_000);
 }

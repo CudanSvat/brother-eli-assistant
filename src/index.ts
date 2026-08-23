@@ -1,6 +1,6 @@
 import { Bot } from "grammy";
 import { BOT_NAME, SLAY_ATH_USD, SLAY_TOKEN, assertConfig, config } from "./config.ts";
-import { openDb, setAthForAddress } from "./store/db.ts";
+import { openDb, bumpAthForAddress } from "./store/db.ts";
 import { registerAdmin } from "./bot/admin.ts";
 import { registerChartCommand } from "./bot/chart-cmd.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
@@ -9,8 +9,7 @@ import { createProvider, EkuboListener } from "./indexer/listener.ts";
 async function main(): Promise<void> {
   assertConfig();
   openDb();
-  // Chart pool never printed the fill-price ATH. Pin back to the real high.
-  setAthForAddress(SLAY_TOKEN, SLAY_ATH_USD);
+  bumpAthForAddress(SLAY_TOKEN, SLAY_ATH_USD);
   const provider = createProvider();
   const bot = new Bot(config.telegramToken);
 

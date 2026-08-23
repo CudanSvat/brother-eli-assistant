@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { tokensByAddress, updateToken, bumpAthForAddress } from "../store/db.ts";
+import { tokensByAddress, updateToken, bumpAthForAddress, wasPosted, markPosted } from "../store/db.ts";
 import {
   chartQuoteForToken,
   getMarketSnapshot,
@@ -92,8 +92,9 @@ export function attachDispatcher(bot: Bot) {
       );
 
       const postKey = `${token.chatId}:${swap.transactionHash}:${swap.tokenAddress}:buy`;
-      if (posted.has(postKey)) continue;
+      if (posted.has(postKey) || wasPosted(postKey)) continue;
       posted.add(postKey);
+      markPosted(postKey);
       if (posted.size > 8_000) posted.clear();
 
       const card = buildAlert({

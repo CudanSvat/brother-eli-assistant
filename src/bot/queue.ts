@@ -1,4 +1,5 @@
-import type { Api, RawApi } from "grammy";
+import { GrammyError, type Api, type RawApi } from "grammy";
+import { deleteGroup } from "../store/db.ts";
 import { alertKeyboard, type AlertLinks } from "./format.ts";
 
 interface Job {
@@ -10,10 +11,12 @@ interface Job {
 
 const queues = new Map<number, Job[]>();
 const busy = new Set<number>();
+const dropped = new Set<number>();
 
 const html = { parse_mode: "HTML" as const, link_preview_options: { is_disabled: true } };
 
 export function enqueueAlert(api: Api<RawApi>, job: Job): void {
+  if (dropped.has(job.chatId)) return;
   const list = queues.get(job.chatId) ?? [];
   list.push(job);
   queues.set(job.chatId, list);
@@ -28,7 +31,15 @@ async function drain(api: Api<RawApi>, chatId: number): Promise<void> {
       const list = queues.get(chatId);
       const job = list?.shift();
       if (!job) break;
-      await send(api, job);
+      try {
+        await send(api, job);
+      } catch (error) {
+        if (isForbidden(error)) {
+          forgetChat(chatId, error);
+          break;
+        }
+        console.warn("Alert send failed:", error);
+      }
       await pause(350);
     }
   } finally {
@@ -46,6 +57,7 @@ async function send(api: Api<RawApi>, job: Job): Promise<void> {
       });
       return;
     } catch (error) {
+      if (isForbidden(error)) throw error;
       console.warn("GIF send failed, falling back:", error);
     }
   }
@@ -54,6 +66,23 @@ async function send(api: Api<RawApi>, job: Job): Promise<void> {
     ...html,
     reply_markup: alertKeyboard(job.links),
   });
+}
+
+function isForbidden(error: unknown): boolean {
+  if (error instanceof GrammyError) {
+    if (error.error_code === 403) return true;
+    return /kicked|blocked|chat not found|bot is not a member|bot was kicked/i.test(
+      error.description,
+    );
+  }
+  return false;
+}
+
+function forgetChat(chatId: number, error: unknown): void {
+  console.warn(`Chat ${chatId} is gone; dropping group and queued alerts:`, error);
+  dropped.add(chatId);
+  queues.delete(chatId);
+  deleteGroup(chatId);
 }
 
 function pause(ms: number): Promise<void> {

@@ -49,15 +49,6 @@ export async function checkBuyAth(
   }
   previousAth = applyAthFloor(token.address, previousAth);
 
-  // Drop a stored ATH that fill-price alerts invented and the chart pool never printed.
-  if (previousAth != null && chartUsd < previousAth && pairAddress) {
-    const poolAth = await getPoolAthUsd(pairAddress);
-    const sane = applyAthFloor(token.address, poolAth);
-    if (sane != null && previousAth > sane * 1.02) {
-      previousAth = sane;
-    }
-  }
-
   if (previousAth == null || previousAth <= 0) {
     return { nextAth: chartUsd, newAth: false, previousAth: null };
   }
