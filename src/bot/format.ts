@@ -8,10 +8,11 @@ import {
   formatUsd,
   normalizeAddress,
   quoteMeta,
+  shortAddress,
   toUnitAmount,
 } from "../lib/format.ts";
 import { avnuSwapUrl, ekuboSwapUrl, starkscanTxUrl } from "../market/ekubo.ts";
-import { geckoChartUrlForToken } from "../market/geckoterminal.ts";
+import { geckoChartUrlForToken, geckoPoolUrl } from "../market/geckoterminal.ts";
 import type { ClassifiedSwap, MarketSnapshot, TokenSettings } from "../types.ts";
 
 export interface AlertPayload {
@@ -131,7 +132,7 @@ export function adminHomeText(
     ...where,
     `Tracked tokens: <b>${count}/${config.maxTokensPerGroup}</b>`,
     "",
-    "Add a token by contract address. Buy alerts are live now. AVNU/Fibrous split routes in one transaction are merged into a single buy. More helper tools are coming.",
+    "Add a token by contract address, or paste a GeckoTerminal pool link to pin that pair (not the highest-liquidity pool). Buy alerts are live now. AVNU/Fibrous split routes in one transaction are merged into a single buy. More helper tools are coming.",
   ].join("\n");
 }
 
@@ -169,6 +170,9 @@ export function tokenCardText(token: TokenSettings): string {
     `ATH GIF: ${token.athGifUrl ? "set" : "none"}`,
     `ATH: ${athSettingText(token)}`,
     `Price ping: ${token.priceAlertPct != null ? `when price moves ±${token.priceAlertPct}%` : "off"}`,
+    token.pairAddress
+      ? `Pool: <a href="${geckoPoolUrl(token.pairAddress)}">${shortAddress(token.pairAddress)}</a> (pinned)`
+      : "Pool: auto (highest liquidity)",
   ].join("\n");
 }
 
@@ -212,6 +216,8 @@ export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
       token.priceAlertPct != null ? `Price ping ±${token.priceAlertPct}%` : "Price ping: off",
       `t:price:${token.id}`,
     )
+    .row()
+    .text(token.pairAddress ? "Change pool" : "Pin pool", `t:pool:${token.id}`)
     .row()
     .text("Remove", `t:del:${token.id}`)
     .row()

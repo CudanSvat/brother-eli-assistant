@@ -41,7 +41,7 @@ export function attachDispatcher(bot: Bot) {
       ),
     ];
     const [market, ...legPrices] = await Promise.all([
-      getMarketSnapshot(swap.tokenAddress),
+      getMarketSnapshot(swap.tokenAddress, tokens[0]?.pairAddress),
       ...quoteAddrs.map((address) => getQuotePriceUsd(address)),
     ]);
     const quotePrices = new Map<string, number | null>();
@@ -137,7 +137,7 @@ export function attachDispatcher(bot: Bot) {
       if (trackPrice) {
         updateToken(token.id, {
           lastPriceUsd: trackPrice,
-          pairAddress: resolveChartPair(swap.tokenAddress, market?.pairAddress ?? token.pairAddress),
+          pairAddress: resolveChartPair(swap.tokenAddress, token.pairAddress ?? market?.pairAddress),
           athPriceUsd: athCheck?.nextAth ?? token.athPriceUsd,
         });
       }

@@ -6,7 +6,7 @@ import {
   SLAY_TOKEN,
   config,
 } from "../config.ts";
-import { fetchJson, normalizeAddress, quoteMeta, sleep } from "../lib/format.ts";
+import { fetchJson, isStarknetAddress, normalizeAddress, quoteMeta, sleep } from "../lib/format.ts";
 import { getMarketForToken as getDexMarket } from "./dexscreener.ts";
 import type { Candle, MarketSnapshot } from "../types.ts";
 
@@ -64,6 +64,7 @@ interface GeckoPoolIncluded {
 interface GeckoPoolResponse {
   data?: {
     attributes?: {
+      address?: string;
       base_token_price_usd?: string | null;
       quote_token_price_usd?: string | null;
       reserve_in_usd?: string;
@@ -72,7 +73,16 @@ interface GeckoPoolResponse {
       market_cap_usd?: string | null;
       price_change_percentage?: { h1?: string; h24?: string };
     };
+    relationships?: {
+      base_token?: { data?: { id?: string } };
+      quote_token?: { data?: { id?: string } };
+    };
   };
+  included?: Array<{
+    type?: string;
+    id?: string;
+    attributes?: { address?: string; symbol?: string };
+  }>;
 }
 
 interface OhlcvResponse {
@@ -122,6 +132,71 @@ export function geckoPoolUrl(pool: string): string {
   return `https://www.geckoterminal.com/${NETWORK}/pools/${pool}`;
 }
 
+function cleanPastedUrl(raw: string): string {
+  return raw.trim().replace(/[\u200b-\u200d\ufeff]/g, "");
+}
+
+function geckoHexFromPath(raw: string, kind: "pools" | "tokens"): string | null {
+  const text = cleanPastedUrl(raw);
+  const match = text.match(
+    new RegExp(`geckoterminal\\.com(?:/[^\\s/]+)*/${kind}/(0x[0-9a-fA-F]+)`, "i"),
+  );
+  return match?.[1] && isStarknetAddress(match[1]) ? normalizeAddress(match[1]) : null;
+}
+
+/** GeckoTerminal / DexScreener pool URL only — not a raw token address. */
+export function parsePoolUrl(raw: string): string | null {
+  const fromGecko = geckoHexFromPath(raw, "pools");
+  if (fromGecko) return fromGecko;
+  const dex = cleanPastedUrl(raw).match(/dexscreener\.com\/starknet\/(0x[0-9a-fA-F]+)/i);
+  if (dex?.[1] && isStarknetAddress(dex[1])) return normalizeAddress(dex[1]);
+  return null;
+}
+
+/** GeckoTerminal token page URL. */
+export function parseTokenUrl(raw: string): string | null {
+  return geckoHexFromPath(raw, "tokens");
+}
+
+/** Pool URL or a 0x pool/token address. */
+export function parsePoolInput(raw: string): string | null {
+  const fromUrl = parsePoolUrl(raw);
+  if (fromUrl) return fromUrl;
+  const text = raw.trim();
+  if (isStarknetAddress(text) && isHexPool(text)) return normalizeAddress(text);
+  return null;
+}
+
+export async function resolveGeckoPool(pool: string): Promise<{
+  poolAddress: string;
+  baseToken: string;
+  quoteToken: string | null;
+} | null> {
+  if (!isHexPool(pool)) return null;
+  const address = normalizeAddress(pool);
+  try {
+    const body = await fetchJson<GeckoPoolResponse>(
+      `https://api.geckoterminal.com/api/v2/networks/${NETWORK}/pools/${address}?include=base_token,quote_token`,
+    );
+    const included = body.included ?? [];
+    const addrFromId = (id: string | undefined): string | null => {
+      const hit = included.find((item) => item.id === id && item.type === "token");
+      const raw = hit?.attributes?.address ?? geckoPoolAddress(id);
+      return raw && isStarknetAddress(raw) ? normalizeAddress(raw) : geckoPoolAddress(id);
+    };
+    const baseToken = addrFromId(body.data?.relationships?.base_token?.data?.id);
+    if (!baseToken) return null;
+    return {
+      poolAddress: address,
+      baseToken,
+      quoteToken: addrFromId(body.data?.relationships?.quote_token?.data?.id),
+    };
+  } catch (error) {
+    console.warn("Gecko pool resolve failed:", error);
+    return null;
+  }
+}
+
 export function geckoTokenUrl(address: string): string {
   return `https://www.geckoterminal.com/${NETWORK}/tokens/${normalizeAddress(address)}`;
 }
@@ -163,8 +238,15 @@ export function resolveChartPair(tokenAddress: string, fallback?: string | null)
   return fallback && isHexPool(fallback) ? normalizeAddress(fallback) : null;
 }
 
+function pinnedPoolFor(tokenAddress: string, hint?: string | null): string | null {
+  return (
+    chartPoolForToken(tokenAddress) ??
+    (hint && isHexPool(hint) ? normalizeAddress(hint) : null)
+  );
+}
+
 export function geckoChartUrlForToken(tokenAddress: string, market?: MarketSnapshot | null): string {
-  const pool = chartPoolForToken(tokenAddress);
+  const pool = pinnedPoolFor(tokenAddress, market?.pairAddress);
   if (pool) return geckoPoolUrl(pool);
   if (market?.pairUrl) return market.pairUrl;
   return geckoTokenUrl(tokenAddress);
@@ -174,8 +256,9 @@ function applyChartPoolOverride(
   tokenAddress: string,
   market: MarketSnapshot | null,
   poolSnap: MarketSnapshot | null,
+  pinnedPool?: string | null,
 ): MarketSnapshot | null {
-  const pool = chartPoolForToken(tokenAddress);
+  const pool = pinnedPoolFor(tokenAddress, pinnedPool);
   if (!pool) return market;
   const quote = chartQuoteForToken(tokenAddress);
   const quoteSymbol = quote ? quoteMeta(quote).symbol : (poolSnap?.quoteSymbol ?? market?.quoteSymbol ?? null);
@@ -339,15 +422,18 @@ function mergeMarketSnapshots(
   };
 }
 
-/** GeckoTerminal + DexScreener; SLAY price/ATH/links use the pinned chart pool. */
-export async function getMarketSnapshot(tokenAddress: string): Promise<MarketSnapshot | null> {
-  const pool = chartPoolForToken(tokenAddress);
+/** GeckoTerminal + DexScreener; pinned pool (SLAY env or stored pair) wins for price/charts. */
+export async function getMarketSnapshot(
+  tokenAddress: string,
+  pinnedPool?: string | null,
+): Promise<MarketSnapshot | null> {
+  const pool = pinnedPoolFor(tokenAddress, pinnedPool);
   const [gecko, dex, chart] = await Promise.all([
     getGeckoMarket(tokenAddress),
     getDexMarket(tokenAddress),
     pool ? getGeckoPool(pool) : Promise.resolve(null),
   ]);
-  return applyChartPoolOverride(tokenAddress, mergeMarketSnapshots(gecko, dex), chart);
+  return applyChartPoolOverride(tokenAddress, mergeMarketSnapshots(gecko, dex), chart, pool);
 }
 
 const STABLES = new Set(["USDC", "USDT"]);

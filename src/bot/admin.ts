@@ -17,8 +17,9 @@ import {
   updateToken,
   upsertGroup,
 } from "../store/db.ts";
+import { addressesEqual } from "../lib/format.ts";
 import { resolveToken } from "../market/tokens.ts";
-import { resolveChartPair } from "../market/geckoterminal.ts";
+import { parsePoolInput, resolveChartPair, resolveGeckoPool } from "../market/geckoterminal.ts";
 import { seedAthUsd } from "./ath.ts";
 import {
   adminHomeText,
@@ -364,7 +365,10 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     }
     pending.set(pendingKey(ctx.from!.id, ctx.chat!.id), { kind: "add_token", chatId: groupId });
     await ctx.answerCallbackQuery();
-    await ask(ctx, "Send the Starknet token contract address.");
+    await ask(
+      ctx,
+      "Send a Starknet token contract, or a GeckoTerminal pool/token link.\nA pool link pins that pair for charts and price.",
+    );
   });
 
   bot.callbackQuery(/^t:view:(\d+)$/, async (ctx) => {
@@ -511,6 +515,26 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     );
   });
 
+  bot.callbackQuery(/^t:pool:(\d+)$/, async (ctx) => {
+    const groupId = await requireAdmin(ctx);
+    if (!groupId) return deny(ctx);
+    pending.set(pendingKey(ctx.from!.id, ctx.chat!.id), {
+      kind: "set_pool",
+      chatId: groupId,
+      tokenId: Number(ctx.match![1]),
+    });
+    await ctx.answerCallbackQuery();
+    await ask(
+      ctx,
+      [
+        "Send a GeckoTerminal pool link (or the pool address) to pin charts and price to that pair.",
+        "Use this when the highest-liquidity pool is not the original one you want.",
+        "",
+        "Send auto to unpin and go back to the highest-liquidity pool.",
+      ].join("\n"),
+    );
+  });
+
   bot.callbackQuery(/^t:del:(\d+)$/, async (ctx) => {
     const groupId = await requireAdmin(ctx);
     if (!groupId) return deny(ctx);
@@ -638,7 +662,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       const resolved = await resolveToken(provider, text);
       if (!resolved) {
         pending.set(key, action);
-        await ctx.reply("Could not resolve that address. Check the chain and try again, or tap Cancel.", {
+        await ctx.reply("Could not resolve that. Send a token contract or a GeckoTerminal pool/token link, or tap Cancel.", {
           reply_markup: cancelKeyboard(),
         });
         return;
@@ -658,7 +682,9 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
           updateToken(token.id, { athPriceUsd: ath });
         }
         await ctx.reply(
-          `Token <b>${token.symbol}</b> added [${countTokens(action.chatId)}/${config.maxTokensPerGroup}]`,
+          `Token <b>${token.symbol}</b> added [${countTokens(action.chatId)}/${config.maxTokensPerGroup}]${
+            token.pairAddress ? "\nPinned the pool you sent for charts and price." : ""
+          }`,
           { parse_mode: "HTML", reply_markup: tokenKeyboard(token) },
         );
       } catch {
@@ -670,6 +696,62 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     const token = getToken(action.tokenId);
     if (!token || token.chatId !== action.chatId) {
       await ctx.reply("Token not found.");
+      return;
+    }
+
+    if (action.kind === "set_pool") {
+      if (/^(auto|clear|off|none|-)$/i.test(text)) {
+        const nextToken = updateToken(token.id, { pairAddress: null });
+        await ctx.reply(tokenCardText(nextToken!), {
+          parse_mode: "HTML",
+          reply_markup: tokenKeyboard(nextToken!),
+          link_preview_options: { is_disabled: true },
+        });
+        return;
+      }
+      const pool = parsePoolInput(text);
+      if (!pool) {
+        pending.set(key, action);
+        await ctx.reply("Send a GeckoTerminal pool link or pool address, or auto to unpin — or tap Cancel.", {
+          reply_markup: cancelKeyboard(),
+        });
+        return;
+      }
+      await ctx.reply("Looking up pool…");
+      const meta = await resolveGeckoPool(pool);
+      if (!meta) {
+        pending.set(key, action);
+        await ctx.reply("Could not load that pool on GeckoTerminal. Try again, or tap Cancel.", {
+          reply_markup: cancelKeyboard(),
+        });
+        return;
+      }
+      const isBase = addressesEqual(meta.baseToken, token.address);
+      const isQuote = Boolean(meta.quoteToken && addressesEqual(meta.quoteToken, token.address));
+      if (!isBase && !isQuote) {
+        pending.set(key, action);
+        await ctx.reply("That pool does not contain this token. Send a pool for this token, or tap Cancel.", {
+          reply_markup: cancelKeyboard(),
+        });
+        return;
+      }
+      if (!isBase && isQuote) {
+        pending.set(key, action);
+        await ctx.reply(
+          "Pin a pool where this token is the base (left side of the pair) so charts and price match.",
+          { reply_markup: cancelKeyboard() },
+        );
+        return;
+      }
+      const nextToken = updateToken(token.id, { pairAddress: meta.poolAddress });
+      const ath = await seedAthUsd(token.address, meta.poolAddress);
+      if (ath) updateToken(token.id, { athPriceUsd: ath });
+      const shown = getToken(token.id) ?? nextToken;
+      await ctx.reply(tokenCardText(shown!), {
+        parse_mode: "HTML",
+        reply_markup: tokenKeyboard(shown!),
+        link_preview_options: { is_disabled: true },
+      });
       return;
     }
 

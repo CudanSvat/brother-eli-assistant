@@ -78,7 +78,7 @@ async function buildChart(
   let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
   if (!chartPoolForToken(token.address)) {
     try {
-      market = await getMarketSnapshot(token.address);
+      market = await getMarketSnapshot(token.address, token.pairAddress);
     } catch {
       market = null;
     }

@@ -1,6 +1,12 @@
 import { RpcProvider, num } from "starknet";
 import { getEkuboToken } from "./ekubo.ts";
-import { getMarketSnapshot, resolveChartPair } from "./geckoterminal.ts";
+import {
+  getMarketSnapshot,
+  parsePoolUrl,
+  parseTokenUrl,
+  resolveChartPair,
+  resolveGeckoPool,
+} from "./geckoterminal.ts";
 import { isStarknetAddress, normalizeAddress } from "../lib/format.ts";
 
 const ERC20_ABI = [
@@ -26,6 +32,15 @@ const ERC20_ABI = [
     state_mutability: "view",
   },
 ] as const;
+
+type ResolvedToken = {
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  pairAddress: string | null;
+  quoteAddress: string | null;
+};
 
 function feltToAscii(value: string): string {
   const hex = num.toHex(value).replace(/^0x/, "");
@@ -54,22 +69,16 @@ async function callFelt(
   }
 }
 
-export async function resolveToken(
+async function resolveTokenByAddress(
   provider: RpcProvider,
   rawAddress: string,
-): Promise<{
-  address: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  pairAddress: string | null;
-  quoteAddress: string | null;
-} | null> {
+  pinnedPool?: string | null,
+): Promise<ResolvedToken | null> {
   if (!isStarknetAddress(rawAddress)) return null;
   const address = normalizeAddress(rawAddress);
 
   const ekubo = await getEkuboToken(address);
-  const market = await getMarketSnapshot(address);
+  const market = await getMarketSnapshot(address, pinnedPool);
 
   let symbol = ekubo?.symbol;
   let name = ekubo?.name;
@@ -95,9 +104,31 @@ export async function resolveToken(
     symbol: (symbol || "TOKEN").slice(0, 20),
     name: name || symbol || "Unknown",
     decimals: Number.isFinite(decimals) ? Number(decimals) : 18,
-    pairAddress: resolveChartPair(address, market?.pairAddress ?? null),
+    pairAddress: resolveChartPair(address, pinnedPool ?? market?.pairAddress ?? null),
     quoteAddress: null,
   };
+}
+
+async function resolveFromPool(provider: RpcProvider, pool: string): Promise<ResolvedToken | null> {
+  const meta = await resolveGeckoPool(pool);
+  if (!meta) return null;
+  return resolveTokenByAddress(provider, meta.baseToken, meta.poolAddress);
+}
+
+export async function resolveToken(provider: RpcProvider, raw: string): Promise<ResolvedToken | null> {
+  const urlPool = parsePoolUrl(raw);
+  if (urlPool) return resolveFromPool(provider, urlPool);
+
+  const urlToken = parseTokenUrl(raw);
+  if (urlToken) return resolveTokenByAddress(provider, urlToken);
+
+  const text = raw.trim();
+  if (!isStarknetAddress(text)) return null;
+
+  const asToken = await resolveTokenByAddress(provider, text);
+  if (asToken) return asToken;
+
+  return resolveFromPool(provider, text);
 }
 
 export { ERC20_ABI };
