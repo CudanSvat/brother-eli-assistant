@@ -1,15 +1,25 @@
 import "dotenv/config";
 import { hash } from "starknet";
+import { parseRpcUrls } from "./lib/rpc.ts";
+
+const DEFAULT_RPC = "https://api.cartridge.gg/x/starknet/mainnet";
+
+const rpcUrls = parseRpcUrls(process.env.STARKNET_RPC_URL, process.env.STARKNET_RPC_URLS);
+if (!rpcUrls.length) rpcUrls.push(DEFAULT_RPC);
 
 export const config = {
   telegramToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
-  rpcUrl: process.env.STARKNET_RPC_URL?.trim() || "https://api.cartridge.gg/x/starknet/mainnet",
+  /** Primary RPC (first of {@link rpcUrls}). */
+  rpcUrl: rpcUrls[0]!,
+  /** Ordered RPC endpoints; on 429 the client rotates to the next. */
+  rpcUrls,
   wsUrl: process.env.STARKNET_WS_URL?.trim() || "",
   databasePath: process.env.DATABASE_PATH?.trim() || "data/brother-eli.db",
   /** CoinGecko Onchain / Analyst key unlocks OHLCV beyond the public ~180 day cap. */
   coingeckoApiKey: process.env.COINGECKO_API_KEY?.trim() || process.env.GECKOTERMINAL_API_KEY?.trim() || "",
   maxTokensPerGroup: 10,
-  hopFlushMs: 700,
+  /** Quiet window after last hop before flush; receipt enrich still fills gaps. */
+  hopFlushMs: 1_500,
   pollIntervalMs: 2_000,
   chartCacheMs: 15_000,
 };

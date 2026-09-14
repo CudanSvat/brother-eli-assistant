@@ -38,11 +38,11 @@ copy .env.example .env
 
 ```
 TELEGRAM_BOT_TOKEN=123456:abc
-STARKNET_RPC_URL=https://api.cartridge.gg/x/starknet/mainnet
+STARKNET_RPC_URL=https://starknet-mainnet.g.alchemy.com/v2/KEY1,https://starknet-mainnet.g.alchemy.com/v2/KEY2
 STARKNET_WS_URL=
 ```
 
-Production uses the Alchemy mainnet RPC from the portfolio project (Railway variable). Cartridge is only the public fallback.
+Comma-separate multiple Alchemy (or other) RPC URLs â€” on 429 / capacity exceeded the bot cools that endpoint for 5 minutes and retries on the next. Production sets `STARKNET_RPC_URL` in Railway.
 
 4. Install and run:
 
@@ -132,7 +132,7 @@ Token settings (min buy, GIF, chart on/off) live in each service's SQLite file â
 The bot token lives in `.env` and is gitignored. Production on Railway uses:
 
 - `TELEGRAM_BOT_TOKEN` (set in the Railway dashboard / CLI, never committed)
-- `STARKNET_RPC_URL` (Alchemy mainnet from the portfolio project; set in Railway, never committed)
+- `STARKNET_RPC_URL` (one or more Alchemy mainnet URLs, comma-separated; set in Railway, never committed)
 - `DATABASE_PATH=/data/brother-eli.db`
 - `NODE_VERSION=20`
 

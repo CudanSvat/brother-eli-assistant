@@ -3,7 +3,8 @@ import { config, EKUBO_CORE, SWAPPED_SELECTOR } from "../config.ts";
 import { allTrackedAddresses, getMeta, setMeta } from "../store/db.ts";
 import { decodeSwapped } from "./decode.ts";
 import { netTransaction } from "./classify.ts";
-import { normalizeAddress, sleep } from "../lib/format.ts";
+import { normalizeAddress, addressesEqual, sleep } from "../lib/format.ts";
+import { createFailoverFetch } from "../lib/rpc.ts";
 import type { ClassifiedSwap, DecodedSwap } from "../types.ts";
 
 export type SwapHandler = (swap: ClassifiedSwap) => void | Promise<void>;
@@ -25,12 +26,20 @@ function asStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.map(String) : undefined;
 }
 
+function swappedSelectorHex(): string {
+  return normalizeAddress(`0x${BigInt(SWAPPED_SELECTOR).toString(16)}`);
+}
+
 export class EkuboListener {
   private readonly pending = new Map<string, PendingTx>();
   private lastBlock = 0;
   private running = false;
   private seen = new Set<string>();
   private flushed = new Set<string>();
+  /** While true, hop timers are deferred so pagination can't flush mid-tx. */
+  private polling = false;
+  private readonly swappedKey = swappedSelectorHex();
+  private readonly ekubo = normalizeAddress(EKUBO_CORE);
 
   constructor(
     private readonly http: RpcProvider,
@@ -100,20 +109,26 @@ export class EkuboListener {
     const to = latest;
     let continuationToken: string | undefined;
 
-    do {
-      const page = await this.http.getEvents({
-        address: EKUBO_CORE,
-        keys: [[SWAPPED_SELECTOR]],
-        from_block: { block_number: from },
-        to_block: { block_number: to },
-        chunk_size: 100,
-        continuation_token: continuationToken,
-      });
-      for (const event of page.events) {
-        this.handleRawEvent(unwrapEvent(event));
-      }
-      continuationToken = page.continuation_token;
-    } while (continuationToken);
+    this.polling = true;
+    try {
+      do {
+        const page = await this.http.getEvents({
+          address: EKUBO_CORE,
+          keys: [[SWAPPED_SELECTOR]],
+          from_block: { block_number: from },
+          to_block: { block_number: to },
+          chunk_size: 100,
+          continuation_token: continuationToken,
+        });
+        for (const event of page.events) {
+          this.handleRawEvent(unwrapEvent(event));
+        }
+        continuationToken = page.continuation_token;
+      } while (continuationToken);
+    } finally {
+      this.polling = false;
+      this.armAllPending();
+    }
 
     this.lastBlock = to;
     setMeta("last_block", String(to));
@@ -144,35 +159,85 @@ export class EkuboListener {
   }
 
   private queueHop(swap: DecodedSwap): void {
-    const key = swap.transactionHash;
+    const key = normalizeAddress(swap.transactionHash);
     if (this.flushed.has(key)) return;
     const existing = this.pending.get(key);
     if (existing) {
       existing.hops.push(swap);
       clearTimeout(existing.timer);
-      existing.timer = this.armFlush(key, existing.hops);
+      existing.timer = this.armFlush(key);
       return;
     }
-    const hops = [swap];
-    this.pending.set(key, { hops, timer: this.armFlush(key, hops) });
+    this.pending.set(key, { hops: [swap], timer: this.armFlush(key) });
   }
 
-  private armFlush(key: string, hops: DecodedSwap[]): ReturnType<typeof setTimeout> {
+  private armAllPending(): void {
+    for (const key of this.pending.keys()) {
+      const entry = this.pending.get(key);
+      if (!entry) continue;
+      clearTimeout(entry.timer);
+      entry.timer = this.armFlush(key);
+    }
+  }
+
+  private armFlush(key: string): ReturnType<typeof setTimeout> {
     return setTimeout(() => {
+      if (this.polling) {
+        // Still paginating — try again after the quiet window.
+        const entry = this.pending.get(key);
+        if (entry) entry.timer = this.armFlush(key);
+        return;
+      }
+      const entry = this.pending.get(key);
       this.pending.delete(key);
-      this.flush(hops).catch((error) => console.warn("Flush failed:", error));
+      if (!entry) return;
+      this.flush(key, entry.hops).catch((error) => console.warn("Flush failed:", error));
     }, config.hopFlushMs);
   }
 
-  private async flush(hops: DecodedSwap[]): Promise<void> {
-    const txHash = hops[0]?.transactionHash;
-    if (txHash) {
-      if (this.flushed.has(txHash)) return;
-      this.flushed.add(txHash);
-      if (this.flushed.size > 8_000) {
-        this.flushed = new Set([...this.flushed].slice(-4_000));
+  /**
+   * Prefer the full tx receipt so AVNU multi-hop routes aren't valued from a
+   * partial hop set (HTTP pagination / WS can deliver hops seconds apart).
+   */
+  async hopsFromReceipt(txHash: string, fallback: DecodedSwap[]): Promise<DecodedSwap[]> {
+    try {
+      const receipt = await this.http.getTransactionReceipt(txHash);
+      const events = (receipt as { events?: Array<Record<string, unknown>> }).events ?? [];
+      const hops: DecodedSwap[] = [];
+      const blockNumber =
+        Number((receipt as { block_number?: number }).block_number ?? fallback[0]?.blockNumber ?? 0);
+      for (const ev of events) {
+        const from = String(ev.from_address ?? ev.fromAddress ?? "");
+        if (!addressesEqual(from, this.ekubo)) continue;
+        const keys = asStringArray(ev.keys) ?? [];
+        if (!keys.length || normalizeAddress(keys[0]!) !== this.swappedKey) continue;
+        const data = asStringArray(ev.data);
+        if (!data?.length) continue;
+        hops.push(
+          decodeSwapped({
+            keys,
+            data,
+            transaction_hash: txHash,
+            block_number: blockNumber,
+          }),
+        );
       }
+      if (hops.length >= fallback.length) return hops;
+    } catch (error) {
+      console.warn(`Receipt enrich failed for ${txHash}:`, error);
     }
+    return fallback;
+  }
+
+  private async flush(txHash: string, buffered: DecodedSwap[]): Promise<void> {
+    const key = normalizeAddress(txHash);
+    if (this.flushed.has(key)) return;
+    this.flushed.add(key);
+    if (this.flushed.size > 8_000) {
+      this.flushed = new Set([...this.flushed].slice(-4_000));
+    }
+
+    const hops = await this.hopsFromReceipt(txHash, buffered);
     const tracked = allTrackedAddresses();
     if (!tracked.length) return;
 
@@ -180,7 +245,7 @@ export class EkuboListener {
       const merged = netTransaction(hops, token);
       if (!merged) continue;
       console.log(
-        `Ekubo ${merged.side} ${token} hops=${merged.hopCount} block=${merged.blockNumber} tx=${merged.transactionHash}`,
+        `Ekubo ${merged.side} ${token} hops=${merged.hopCount} (buf=${buffered.length}) block=${merged.blockNumber} tx=${merged.transactionHash}`,
       );
       await this.onSwap(merged);
     }
@@ -188,7 +253,14 @@ export class EkuboListener {
 }
 
 export function createProvider(): RpcProvider {
-  return new RpcProvider({ nodeUrl: config.rpcUrl });
+  const urls = config.rpcUrls;
+  if (urls.length > 1) {
+    console.log(`RPC failover: ${urls.length} endpoints`);
+  }
+  return new RpcProvider({
+    nodeUrl: urls[0]!,
+    baseFetch: createFailoverFetch(urls),
+  });
 }
 
 export { normalizeAddress };
