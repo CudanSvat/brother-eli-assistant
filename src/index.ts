@@ -3,6 +3,7 @@ import { BOT_NAME, SLAY_ATH_USD, SLAY_TOKEN, assertConfig, config } from "./conf
 import { openDb, bumpAthForAddress } from "./store/db.ts";
 import { registerAdmin } from "./bot/admin.ts";
 import { registerChartCommand } from "./bot/chart-cmd.ts";
+import { registerEliCommand } from "./bot/eli-cmd.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
 import { createProvider, EkuboListener } from "./indexer/listener.ts";
 
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
 
   registerAdmin(bot, provider);
   registerChartCommand(bot);
+  registerEliCommand(bot);
   const onSwap = attachDispatcher(bot);
   const listener = new EkuboListener(provider, onSwap);
 

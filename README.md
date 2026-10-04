@@ -91,6 +91,16 @@ Anyone in the group (or a connected DM) can send:
 
 Default window is **7d**. Buttons on the same message switch **1d · 3d · 7d · 1M · All** (edits the photo, no new message).
 
+### Brother Eli NFT
+
+Anyone can send:
+
+```
+/eli 233
+```
+
+The bot fetches the minted Eli PNG from the site and posts it with the full trait list. Unminted IDs stay hidden.
+
 Close the panel with **Close**, **Cancel**, `/cancel`, or `/close`. That also drops any in-progress prompt (GIF, min USD, etc.) so later chat messages are not captured.
 
 ## How detection works

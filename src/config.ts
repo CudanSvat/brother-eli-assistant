@@ -17,6 +17,10 @@ export const config = {
   databasePath: process.env.DATABASE_PATH?.trim() || "data/brother-eli.db",
   /** CoinGecko Onchain / Analyst key unlocks OHLCV beyond the public ~180 day cap. */
   coingeckoApiKey: process.env.COINGECKO_API_KEY?.trim() || process.env.GECKOTERMINAL_API_KEY?.trim() || "",
+  /** Origin that serves Brother Eli NFT images/metadata (`/nft/images/:id.png`). */
+  eliSiteOrigin: (
+    process.env.ELI_SITE_ORIGIN?.trim() || "https://brother-eli-slay-production.up.railway.app"
+  ).replace(/\/$/, ""),
   maxTokensPerGroup: 10,
   /** Quiet window after last hop before flush; receipt enrich still fills gaps. */
   hopFlushMs: 1_500,
