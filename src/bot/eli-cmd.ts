@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, InputFile } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import { config } from "../config.ts";
 import { escapeHtml } from "../lib/format.ts";
 
@@ -31,23 +31,6 @@ function eliUrls(id: number): { image: string; metadata: string; marketplace: st
   };
 }
 
-async function fetchEliImage(url: string): Promise<Buffer | null> {
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: "image/png", "User-Agent": "BrotherEliAssistant/1" },
-      signal: AbortSignal.timeout(FETCH_MS),
-    });
-    if (!res.ok) return null;
-    const type = res.headers.get("content-type") || "";
-    if (!type.includes("image/")) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf.length ? buf : null;
-  } catch (error) {
-    console.warn("Eli image fetch failed:", error);
-    return null;
-  }
-}
-
 async function fetchEliMetadata(url: string): Promise<EliMetadata | null> {
   try {
     const res = await fetch(url, {
@@ -56,7 +39,8 @@ async function fetchEliMetadata(url: string): Promise<EliMetadata | null> {
     });
     if (!res.ok) return null;
     return (await res.json()) as EliMetadata;
-  } catch {
+  } catch (error) {
+    console.warn("Eli metadata fetch failed:", error);
     return null;
   }
 }
@@ -96,25 +80,22 @@ export function registerEliCommand(bot: Bot): void {
     }
 
     const urls = eliUrls(id);
-    const waiting = await ctx.reply(`Loading Eli #${id}…`);
-
-    const [png, meta] = await Promise.all([fetchEliImage(urls.image), fetchEliMetadata(urls.metadata)]);
-
-    try {
-      await ctx.api.deleteMessage(ctx.chat.id, waiting.message_id);
-    } catch {
-      // ignore
-    }
-
-    if (!png) {
+    const meta = await fetchEliMetadata(urls.metadata);
+    if (!meta) {
       await ctx.reply(`Eli #${id} not found (unminted or unavailable).`);
       return;
     }
 
-    await ctx.replyWithPhoto(new InputFile(png, `eli-${id}.png`), {
-      caption: captionFor(id, meta),
-      parse_mode: "HTML",
-      reply_markup: eliKeyboard(urls),
-    });
+    try {
+      // Let Telegram pull the PNG directly — avoids a ~600KB bot download/re-upload.
+      await ctx.replyWithPhoto(urls.image, {
+        caption: captionFor(id, meta),
+        parse_mode: "HTML",
+        reply_markup: eliKeyboard(urls),
+      });
+    } catch (error) {
+      console.warn("Eli photo send failed:", error);
+      await ctx.reply(`Could not load Eli #${id} image. Try again in a moment.`);
+    }
   });
 }
