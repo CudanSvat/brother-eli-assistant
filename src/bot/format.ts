@@ -168,7 +168,8 @@ export function tokenCardText(token: TokenSettings): string {
     `Emoji: ${token.emoji}  ·  one extra every ${formatUsd(token.emojiStepUsd)}`,
     `GIF: ${token.gifUrl ? "set" : "none"}`,
     `ATH GIF: ${token.athGifUrl ? "set" : "none"}`,
-    `ATH: ${athSettingText(token)}`,
+    `ATH alerts: ${athSettingText(token)}`,
+    `ATH mark: ${token.athPriceUsd != null ? formatTokenPrice(token.athPriceUsd) : "not seeded"}`,
     `Price ping: ${token.priceAlertPct != null ? `when price moves ±${token.priceAlertPct}%` : "off"}`,
     token.pairAddress
       ? `Pool: <a href="${geckoPoolUrl(token.pairAddress)}">${shortAddress(token.pairAddress)}</a> (pinned)`
@@ -218,6 +219,7 @@ export function tokenKeyboard(token: TokenSettings): InlineKeyboard {
     )
     .row()
     .text(token.pairAddress ? "Change pool" : "Pin pool", `t:pool:${token.id}`)
+    .text("Refresh ATH", `t:rath:${token.id}`)
     .row()
     .text("Remove", `t:del:${token.id}`)
     .row()

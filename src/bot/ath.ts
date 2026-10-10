@@ -24,16 +24,29 @@ function applyAthFloor(tokenAddress: string, ath: number | null | undefined): nu
   return Math.max(...values);
 }
 
+/**
+ * Authoritative ATH from the pinned Gecko pool (+ manual floor).
+ * Prefer pool history over a stale/low stored mark so "NEW ATH" is not
+ * announced against the first buy we happened to see.
+ */
 export async function seedAthUsd(
   tokenAddress: string,
   pairAddress: string | null | undefined,
   storedAth?: number | null,
 ): Promise<number | null> {
-  let ath = storedAth ?? null;
-  if (ath == null && pairAddress) {
-    ath = await getPoolAthUsd(pairAddress);
+  let geckoAth: number | null = null;
+  if (pairAddress) {
+    geckoAth = await getPoolAthUsd(pairAddress);
   }
+  // Trust Gecko when we have it; only fall back to stored if history is missing.
+  const ath = geckoAth ?? storedAth ?? null;
   return applyAthFloor(tokenAddress, ath);
+}
+
+function maxAth(...values: Array<number | null | undefined>): number | null {
+  const nums = values.filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
+  if (!nums.length) return null;
+  return Math.max(...nums);
 }
 
 export async function checkBuyAth(
@@ -43,11 +56,16 @@ export async function checkBuyAth(
 ): Promise<AthCheck | null> {
   if (chartUsd == null || !Number.isFinite(chartUsd) || chartUsd <= 0) return null;
 
-  let previousAth = token.athPriceUsd;
-  if (previousAth == null && pairAddress) {
-    previousAth = await getPoolAthUsd(pairAddress);
+  // Merge stored mark with pool history so a missed seed can't false-trigger ATH.
+  let geckoAth: number | null = null;
+  if (pairAddress) {
+    try {
+      geckoAth = await getPoolAthUsd(pairAddress);
+    } catch {
+      geckoAth = null;
+    }
   }
-  previousAth = applyAthFloor(token.address, previousAth);
+  let previousAth = applyAthFloor(token.address, maxAth(token.athPriceUsd, geckoAth));
 
   if (previousAth == null || previousAth <= 0) {
     return { nextAth: chartUsd, newAth: false, previousAth: null };

@@ -686,15 +686,34 @@ async function fetchDayHistory(pool: string): Promise<Candle[]> {
   return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
-/** Highest daily high from the pinned pool (~180d on the public API). */
+const athCache = new Map<string, { at: number; value: number | null }>();
+const ATH_CACHE_MS = 60 * 60_000;
+
+/** Highest USD high from the pinned pool (daily history + recent hourly tips). */
 export async function getPoolAthUsd(pairAddress: string | null | undefined): Promise<number | null> {
   if (!pairAddress || !isHexPool(pairAddress)) return null;
+  const key = normalizeAddress(pairAddress);
+  const hit = athCache.get(key);
+  if (hit && Date.now() - hit.at < ATH_CACHE_MS) return hit.value;
+
   try {
     const days = await fetchDayHistory(pairAddress);
-    if (!days.length) return null;
-    const ath = Math.max(...days.map((c) => c.high));
-    return Number.isFinite(ath) && ath > 0 ? ath : null;
+    let ath = days.length ? Math.max(...days.map((c) => c.high)) : null;
+    // Hourly tips catch peaks the daily bucket hasn't finalized yet.
+    try {
+      const hours = await tryOhlcv(pairAddress, "hour", 1, 1000, { includeEmpty: false });
+      if (hours.length) {
+        const hourAth = Math.max(...hours.map((c) => c.high));
+        ath = ath != null ? Math.max(ath, hourAth) : hourAth;
+      }
+    } catch {
+      // day history alone is enough
+    }
+    const value = ath != null && Number.isFinite(ath) && ath > 0 ? ath : null;
+    athCache.set(key, { at: Date.now(), value });
+    return value;
   } catch {
+    athCache.set(key, { at: Date.now(), value: null });
     return null;
   }
 }

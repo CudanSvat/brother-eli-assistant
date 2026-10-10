@@ -13,13 +13,19 @@ import {
   insertToken,
   listGroups,
   listTokens,
+  setAthForAddress,
   setDmSession,
   updateToken,
   upsertGroup,
 } from "../store/db.ts";
-import { addressesEqual } from "../lib/format.ts";
+import { addressesEqual, formatTokenPrice } from "../lib/format.ts";
 import { resolveToken } from "../market/tokens.ts";
-import { parsePoolInput, resolveChartPair, resolveGeckoPool } from "../market/geckoterminal.ts";
+import {
+  getMarketSnapshot,
+  parsePoolInput,
+  resolveChartPair,
+  resolveGeckoPool,
+} from "../market/geckoterminal.ts";
 import { seedAthUsd } from "./ath.ts";
 import {
   adminHomeText,
@@ -535,6 +541,54 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     );
   });
 
+  bot.callbackQuery(/^t:rath:(\d+)$/, async (ctx) => {
+    const groupId = await requireAdmin(ctx);
+    if (!groupId) return deny(ctx);
+    const token = getToken(Number(ctx.match![1]));
+    if (!token || token.chatId !== groupId) {
+      await ctx.answerCallbackQuery({ text: "Token not found" });
+      return;
+    }
+
+    let pair = resolveChartPair(token.address, token.pairAddress);
+    if (!pair) {
+      try {
+        const market = await getMarketSnapshot(token.address, token.pairAddress);
+        pair = resolveChartPair(token.address, market?.pairAddress ?? null);
+        if (pair && !token.pairAddress) {
+          updateToken(token.id, { pairAddress: pair });
+        }
+      } catch {
+        pair = null;
+      }
+    }
+    if (!pair) {
+      await ctx.answerCallbackQuery({
+        text: "No Gecko pool — pin a pool link first",
+        show_alert: true,
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Reading ATH from Gecko…" });
+    const ath = await seedAthUsd(token.address, pair, token.athPriceUsd);
+    if (ath) setAthForAddress(token.address, ath);
+    const shown = getToken(token.id) ?? token;
+    try {
+      await ctx.editMessageText(tokenCardText(shown), {
+        parse_mode: "HTML",
+        reply_markup: tokenKeyboard(shown),
+        link_preview_options: { is_disabled: true },
+      });
+    } catch {
+      await ctx.reply(tokenCardText(shown), {
+        parse_mode: "HTML",
+        reply_markup: tokenKeyboard(shown),
+        link_preview_options: { is_disabled: true },
+      });
+    }
+  });
+
   bot.callbackQuery(/^t:del:(\d+)$/, async (ctx) => {
     const groupId = await requireAdmin(ctx);
     if (!groupId) return deny(ctx);
@@ -672,20 +726,32 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         return;
       }
       try {
+        let pair = resolveChartPair(resolved.address, resolved.pairAddress);
+        if (!pair) {
+          try {
+            const market = await getMarketSnapshot(resolved.address, resolved.pairAddress);
+            pair = resolveChartPair(resolved.address, market?.pairAddress ?? null);
+          } catch {
+            pair = null;
+          }
+        }
         const token = insertToken({
           chatId: action.chatId,
           ...resolved,
+          pairAddress: pair ?? resolved.pairAddress,
         });
-        const pair = resolveChartPair(resolved.address, resolved.pairAddress);
-        const ath = await seedAthUsd(resolved.address, pair);
-        if (ath) {
-          updateToken(token.id, { athPriceUsd: ath });
-        }
+        const ath = await seedAthUsd(token.address, pair);
+        if (ath) setAthForAddress(token.address, ath);
+        const shown = getToken(token.id) ?? token;
+        const athLine =
+          ath != null
+            ? `\nATH mark seeded: <b>${formatTokenPrice(ath)}</b> (from Gecko pool history)`
+            : "\nATH mark: could not read pool history — pin a Gecko pool, then Refresh ATH.";
         await ctx.reply(
-          `Token <b>${token.symbol}</b> added [${countTokens(action.chatId)}/${config.maxTokensPerGroup}]${
-            token.pairAddress ? "\nPinned the pool you sent for charts and price." : ""
-          }`,
-          { parse_mode: "HTML", reply_markup: tokenKeyboard(token) },
+          `Token <b>${shown.symbol}</b> added [${countTokens(action.chatId)}/${config.maxTokensPerGroup}]${
+            shown.pairAddress ? "\nPinned the pool for charts, price, and ATH." : ""
+          }${athLine}`,
+          { parse_mode: "HTML", reply_markup: tokenKeyboard(shown) },
         );
       } catch {
         await ctx.reply("That token is already tracked in this group.");
@@ -743,13 +809,17 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         );
         return;
       }
-      const nextToken = updateToken(token.id, { pairAddress: meta.poolAddress });
+      updateToken(token.id, { pairAddress: meta.poolAddress });
       const ath = await seedAthUsd(token.address, meta.poolAddress);
-      if (ath) updateToken(token.id, { athPriceUsd: ath });
-      const shown = getToken(token.id) ?? nextToken;
-      await ctx.reply(tokenCardText(shown!), {
+      if (ath) setAthForAddress(token.address, ath);
+      const shown = getToken(token.id) ?? token;
+      const athNote =
+        ath != null
+          ? `\n\nATH mark refreshed: <b>${formatTokenPrice(ath)}</b>`
+          : "\n\nCould not read ATH from that pool yet.";
+      await ctx.reply(`${tokenCardText(shown)}${athNote}`, {
         parse_mode: "HTML",
-        reply_markup: tokenKeyboard(shown!),
+        reply_markup: tokenKeyboard(shown),
         link_preview_options: { is_disabled: true },
       });
       return;
