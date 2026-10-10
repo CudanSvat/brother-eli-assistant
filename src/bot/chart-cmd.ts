@@ -15,7 +15,7 @@ import {
 } from "../market/geckoterminal.ts";
 import { config } from "../config.ts";
 import { sleep } from "../lib/format.ts";
-import { getDmSession, getToken, listTokens } from "../store/db.ts";
+import { getDmSession, getToken, listTokens, updateToken } from "../store/db.ts";
 import type { TokenSettings } from "../types.ts";
 
 function resolveGroupId(ctx: Context): number | null {
@@ -49,7 +49,21 @@ function geckoChartLink(token: TokenSettings, market?: Awaited<ReturnType<typeof
   return geckoChartUrlForToken(token.address, market);
 }
 
-function chartKeyboard(tokenId: number, active: ChartWindow, geckoUrl: string): InlineKeyboard {
+function tokenPickerKeyboard(tokens: TokenSettings[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  tokens.forEach((t, i) => {
+    kb.text(t.symbol, `ch:${t.id}:${DEFAULT_CHART_WINDOW}`);
+    if (i % 3 === 2) kb.row();
+  });
+  return kb;
+}
+
+function chartKeyboard(
+  tokenId: number,
+  active: ChartWindow,
+  geckoUrl: string,
+  showBack: boolean,
+): InlineKeyboard {
   const kb = new InlineKeyboard();
   CHART_WINDOWS.forEach((window, i) => {
     const label = chartWindowLabel(window);
@@ -58,6 +72,7 @@ function chartKeyboard(tokenId: number, active: ChartWindow, geckoUrl: string): 
     if (i === 2) kb.row();
   });
   kb.row().url("Gecko Chart", geckoUrl);
+  if (showBack) kb.row().text("« Back", "ch:menu");
   return kb;
 }
 
@@ -65,23 +80,32 @@ async function buildChart(
   token: TokenSettings,
   window: ChartWindow,
 ): Promise<{ png: Buffer; caption: string; geckoUrl: string } | null> {
-  const pair = resolveChartPair(token.address, token.pairAddress);
+  // Pinned SLAY pool / stored pair first. Otherwise discover via Gecko/Dex
+  // (tokens added by address alone often have pairAddress null).
+  let pair = resolveChartPair(token.address, token.pairAddress);
+  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
+
+  if (!chartPoolForToken(token.address)) {
+    try {
+      market = await getMarketSnapshot(token.address, token.pairAddress ?? pair);
+    } catch {
+      market = null;
+    }
+  }
+
+  if (!pair) {
+    pair = resolveChartPair(token.address, market?.pairAddress ?? null);
+    if (pair && !token.pairAddress) {
+      updateToken(token.id, { pairAddress: pair });
+      token = { ...token, pairAddress: pair };
+    }
+  }
   if (!pair) return null;
 
-  // OHLCV first — pinned-pool tokens skip Gecko market lookup entirely.
   let { candles, intervalLabel } = await getOhlcvForWindow(pair, window);
   if (candles.length < 2) {
     await sleep(2_500);
     ({ candles, intervalLabel } = await getOhlcvForWindow(pair, window));
-  }
-
-  let market: Awaited<ReturnType<typeof getMarketSnapshot>> = null;
-  if (!chartPoolForToken(token.address)) {
-    try {
-      market = await getMarketSnapshot(token.address, token.pairAddress);
-    } catch {
-      market = null;
-    }
   }
 
   const finish = (
@@ -146,7 +170,8 @@ async function sendOrEditChart(
     return;
   }
 
-  const markup = chartKeyboard(token.id, window, built.geckoUrl);
+  const showBack = listTokens(token.chatId).length > 1;
+  const markup = chartKeyboard(token.id, window, built.geckoUrl, showBack);
   if (edit && ctx.callbackQuery?.message?.photo) {
     try {
       await ctx.editMessageMedia(
@@ -180,11 +205,68 @@ async function sendOrEditChart(
   } catch {
     // ignore
   }
+
+  // Text menus (Which token?) can't become photos in-place — drop the menu,
+  // then send the chart so we don't leave a stacked picker behind.
+  if (ctx.callbackQuery?.message && !ctx.callbackQuery.message.photo) {
+    try {
+      await ctx.deleteMessage();
+    } catch {
+      // too old / already gone
+    }
+  }
+
   await ctx.replyWithPhoto(new InputFile(built.png, "chart.png"), {
     caption: built.caption,
     parse_mode: "HTML",
     reply_markup: markup,
   });
+}
+
+async function showTokenMenu(ctx: Context): Promise<void> {
+  const groupId = resolveGroupId(ctx);
+  if (!groupId) {
+    try {
+      await ctx.answerCallbackQuery({ text: "Connect a group first" });
+    } catch {
+      // expired
+    }
+    return;
+  }
+
+  const tokens = listTokens(groupId);
+  if (tokens.length < 2) {
+    try {
+      await ctx.answerCallbackQuery({ text: "Only one token tracked" });
+    } catch {
+      // expired
+    }
+    return;
+  }
+
+  try {
+    await ctx.answerCallbackQuery();
+  } catch {
+    // expired
+  }
+
+  const markup = tokenPickerKeyboard(tokens);
+  // Photo → text isn't editable in place; replace the message.
+  if (ctx.callbackQuery?.message?.photo) {
+    try {
+      await ctx.deleteMessage();
+    } catch {
+      // ignore
+    }
+    await ctx.reply("Which token?", { reply_markup: markup });
+    return;
+  }
+
+  try {
+    await ctx.editMessageText("Which token?", { reply_markup: markup });
+  } catch {
+    await ctx.reply("Which token?", { reply_markup: markup });
+  }
 }
 
 export function registerChartCommand(bot: Bot): void {
@@ -209,16 +291,15 @@ export function registerChartCommand(bot: Bot): void {
     const arg = ctx.match?.trim() || "";
     const token = pickToken(tokens, arg || undefined);
     if (!token) {
-      const kb = new InlineKeyboard();
-      tokens.forEach((t, i) => {
-        kb.text(t.symbol, `ch:${t.id}:${DEFAULT_CHART_WINDOW}`);
-        if (i % 3 === 2) kb.row();
-      });
-      await ctx.reply("Which token?", { reply_markup: kb });
+      await ctx.reply("Which token?", { reply_markup: tokenPickerKeyboard(tokens) });
       return;
     }
 
     await sendOrEditChart(ctx, token, DEFAULT_CHART_WINDOW, false);
+  });
+
+  bot.callbackQuery("ch:menu", async (ctx) => {
+    await showTokenMenu(ctx);
   });
 
   bot.callbackQuery(/^ch:(\d+):(1d|3d|7d|1m|all)$/, async (ctx) => {
