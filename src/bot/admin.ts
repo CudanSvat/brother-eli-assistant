@@ -574,19 +574,41 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
     const ath = await seedAthUsd(token.address, pair, token.athPriceUsd);
     if (ath) setAthForAddress(token.address, ath);
     const shown = getToken(token.id) ?? token;
+    const note =
+      "\n\n<i>Refresh uses Gecko OHLCV history (~6 months on the free API). Older spikes on the website chart need Set ATH mark, or a CoinGecko onchain API key.</i>";
     try {
-      await ctx.editMessageText(tokenCardText(shown), {
+      await ctx.editMessageText(`${tokenCardText(shown)}${note}`, {
         parse_mode: "HTML",
         reply_markup: tokenKeyboard(shown),
         link_preview_options: { is_disabled: true },
       });
     } catch {
-      await ctx.reply(tokenCardText(shown), {
+      await ctx.reply(`${tokenCardText(shown)}${note}`, {
         parse_mode: "HTML",
         reply_markup: tokenKeyboard(shown),
         link_preview_options: { is_disabled: true },
       });
     }
+  });
+
+  bot.callbackQuery(/^t:sath:(\d+)$/, async (ctx) => {
+    const groupId = await requireAdmin(ctx);
+    if (!groupId) return deny(ctx);
+    pending.set(pendingKey(ctx.from!.id, ctx.chat!.id), {
+      kind: "set_ath_mark",
+      chatId: groupId,
+      tokenId: Number(ctx.match![1]),
+    });
+    await ctx.answerCallbackQuery();
+    await ask(
+      ctx,
+      [
+        "Send the ATH in USD from the Gecko chart (hover the highest candle).",
+        "Example: 0.0007",
+        "",
+        "Send auto to re-read from Gecko OHLCV instead.",
+      ].join("\n"),
+    );
   });
 
   bot.callbackQuery(/^t:del:(\d+)$/, async (ctx) => {
@@ -851,6 +873,49 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       }
       const nextToken = updateToken(token.id, { athMinUsd: value });
       await ctx.reply(tokenCardText(nextToken!), { parse_mode: "HTML", reply_markup: tokenKeyboard(nextToken!) });
+      return;
+    }
+
+    if (action.kind === "set_ath_mark") {
+      if (/^(auto|refresh|gecko)$/i.test(text)) {
+        const pair = resolveChartPair(token.address, token.pairAddress);
+        if (!pair) {
+          pending.set(key, action);
+          await ctx.reply("Pin a Gecko pool first, then try auto — or send a USD ATH.", {
+            reply_markup: cancelKeyboard(),
+          });
+          return;
+        }
+        const ath = await seedAthUsd(token.address, pair);
+        if (!ath) {
+          pending.set(key, action);
+          await ctx.reply("Gecko returned no history. Send the ATH in USD from the chart, e.g. 0.0007.", {
+            reply_markup: cancelKeyboard(),
+          });
+          return;
+        }
+        setAthForAddress(token.address, ath);
+        const shown = getToken(token.id) ?? token;
+        await ctx.reply(
+          `${tokenCardText(shown)}\n\nATH mark from Gecko OHLCV: <b>${formatTokenPrice(ath)}</b>`,
+          { parse_mode: "HTML", reply_markup: tokenKeyboard(shown) },
+        );
+        return;
+      }
+      const value = Number(text.replace(/[$,\s]/g, ""));
+      if (!Number.isFinite(value) || value <= 0) {
+        pending.set(key, action);
+        await ctx.reply("Send a positive USD price, e.g. 0.0007 — or tap Cancel.", {
+          reply_markup: cancelKeyboard(),
+        });
+        return;
+      }
+      setAthForAddress(token.address, value);
+      const shown = getToken(token.id) ?? token;
+      await ctx.reply(
+        `${tokenCardText(shown)}\n\nATH mark set to <b>${formatTokenPrice(value)}</b>`,
+        { parse_mode: "HTML", reply_markup: tokenKeyboard(shown) },
+      );
       return;
     }
 

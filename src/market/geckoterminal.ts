@@ -654,11 +654,15 @@ async function tryOhlcv(
   }
 }
 
-/** Walk backwards with before_timestamp until empty/401. Public API stops ~180d without a key. */
+/**
+ * Walk backwards with before_timestamp until empty/401.
+ * Public / Basic CoinGecko onchain: ~6 months only. Analyst+ key unlocks full history
+ * (the website chart can show older peaks the free OHLCV API omits).
+ */
 async function fetchDayHistory(pool: string): Promise<Candle[]> {
   const byTime = new Map<number, Candle>();
   let before: number | undefined;
-  const maxPages = config.coingeckoApiKey ? 12 : 1;
+  const maxPages = config.coingeckoApiKey ? 24 : 3;
 
   for (let page = 0; page < maxPages; page++) {
     if (Date.now() < geckoCooldownUntil) break;
@@ -673,12 +677,15 @@ async function fetchDayHistory(pool: string): Promise<Candle[]> {
       if (before != null && oldest >= before) break;
       before = oldest;
       if (batch.length < 50) break;
-      if (page + 1 < maxPages) await sleep(350);
+      if (page + 1 < maxPages) await sleep(config.coingeckoApiKey ? 350 : 1_200);
     } catch (error) {
       const status = parseOhlcvStatus(error);
       // Public plan: older than ~180d → 401. Stop; keep what we have.
       if (status === 401 || status === 404) break;
-      if (status === 429) break;
+      if (status === 429) {
+        geckoCooldownUntil = Date.now() + 20_000;
+        break;
+      }
       throw error;
     }
   }

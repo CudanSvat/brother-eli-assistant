@@ -109,5 +109,6 @@ export type PendingAction =
   | { kind: "set_whale_gif"; chatId: number; tokenId: number }
   | { kind: "set_ath_gif"; chatId: number; tokenId: number }
   | { kind: "set_ath_min"; chatId: number; tokenId: number }
+  | { kind: "set_ath_mark"; chatId: number; tokenId: number }
   | { kind: "set_whale_usd"; chatId: number; tokenId: number }
   | { kind: "set_price_pct"; chatId: number; tokenId: number };
