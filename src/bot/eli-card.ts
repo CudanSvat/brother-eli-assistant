@@ -19,6 +19,16 @@ export interface EliUrls {
   marketplace: string;
 }
 
+/** Same tiers as brother-eli-slay `/api/rarity` (Mythic → Common). */
+export interface EliRarity {
+  tier: string;
+  rank?: number;
+  supply?: number;
+}
+
+let tiersCache: { at: number; tiers: Record<string, string> } | null = null;
+const TIERS_CACHE_MS = 5 * 60_000;
+
 export function parseEliId(raw: string | undefined): number | null {
   if (!raw) return null;
   const cleaned = raw.trim().replace(/^#/, "");
@@ -51,10 +61,75 @@ export async function fetchEliMetadata(url: string): Promise<EliMetadata | null>
   }
 }
 
+async function fetchTierMap(): Promise<Record<string, string> | null> {
+  const now = Date.now();
+  if (tiersCache && now - tiersCache.at < TIERS_CACHE_MS) return tiersCache.tiers;
+  try {
+    const res = await fetch(`${config.eliSiteOrigin}/api/rarity/tiers`, {
+      headers: { Accept: "application/json", "User-Agent": "BrotherEliAssistant/1" },
+      signal: AbortSignal.timeout(FETCH_MS),
+    });
+    if (!res.ok) return tiersCache?.tiers ?? null;
+    const body = (await res.json()) as { tiers?: Record<string, string> };
+    if (!body.tiers || typeof body.tiers !== "object") return tiersCache?.tiers ?? null;
+    tiersCache = { at: now, tiers: body.tiers };
+    return body.tiers;
+  } catch (error) {
+    console.warn("Eli rarity tiers fetch failed:", error);
+    return tiersCache?.tiers ?? null;
+  }
+}
+
+/** Rank + tier from the site rarity API (same source as marketplace badges). */
+export async function fetchEliRarity(id: number): Promise<EliRarity | null> {
+  try {
+    const res = await fetch(`${config.eliSiteOrigin}/api/rarity`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "BrotherEliAssistant/1",
+      },
+      body: JSON.stringify({ id }),
+      signal: AbortSignal.timeout(FETCH_MS),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as {
+        tier?: string;
+        rank?: number;
+        supply?: number;
+      };
+      if (body.tier) {
+        return {
+          tier: body.tier,
+          rank: typeof body.rank === "number" ? body.rank : undefined,
+          supply: typeof body.supply === "number" ? body.supply : undefined,
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("Eli rarity fetch failed:", error);
+  }
+
+  const tiers = await fetchTierMap();
+  const tier = tiers?.[String(id)];
+  return tier ? { tier } : null;
+}
+
+function rarityLine(rarity: EliRarity | null | undefined): string | null {
+  if (!rarity?.tier) return null;
+  const tier = escapeHtml(rarity.tier.toUpperCase());
+  if (rarity.rank != null && rarity.supply != null) {
+    return `<b>${tier}</b> · rank #${rarity.rank} / ${rarity.supply}`;
+  }
+  return `<b>${tier}</b>`;
+}
+
 export function eliCaption(
   id: number,
   meta: EliMetadata | null,
   headline?: string | null,
+  rarity?: EliRarity | null,
 ): string {
   const name = meta?.name?.trim() || `Brother Eli Bald Kings #${id}`;
   const lines: string[] = [];
@@ -63,6 +138,8 @@ export function eliCaption(
     lines.push("");
   }
   lines.push(`<b>${escapeHtml(name)}</b>`);
+  const rarityText = rarityLine(rarity);
+  if (rarityText) lines.push(rarityText);
   const traits = (meta?.attributes || []).filter(
     (a) => a.trait_type && a.value != null && String(a.value).length,
   );

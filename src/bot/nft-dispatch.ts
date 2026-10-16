@@ -7,7 +7,7 @@ import {
   wasPosted,
 } from "../store/db.ts";
 import type { NftAlertEvent } from "../indexer/nft-activity.ts";
-import { eliCaption, eliKeyboard, eliUrls, fetchEliMetadata } from "./eli-card.ts";
+import { eliCaption, eliKeyboard, eliUrls, fetchEliMetadata, fetchEliRarity } from "./eli-card.ts";
 
 function headlineFor(event: NftAlertEvent): string {
   const price = event.priceLabel ? ` · ${event.priceLabel}` : "";
@@ -49,13 +49,16 @@ export function attachNftDispatcher(bot: Bot) {
     if (!chatIds.length) return;
 
     const urls = eliUrls(event.tokenId);
-    const meta = await fetchEliMetadata(urls.metadata);
+    const [meta, rarity] = await Promise.all([
+      fetchEliMetadata(urls.metadata),
+      fetchEliRarity(event.tokenId),
+    ]);
     if (!meta) {
       console.warn(`NFT alert skip Eli #${event.tokenId}: metadata unavailable`);
       return;
     }
 
-    const caption = eliCaption(event.tokenId, meta, headlineFor(event));
+    const caption = eliCaption(event.tokenId, meta, headlineFor(event), rarity);
     const markup = eliKeyboard(urls);
 
     for (const chatId of chatIds) {
