@@ -99,7 +99,7 @@ Anyone can send:
 /eli 233
 ```
 
-The bot fetches the minted Eli PNG from the site and posts it with the full trait list plus rarity tier/rank (same `/api/rarity` data as the marketplace badges). Unminted IDs stay hidden.
+The bot fetches the minted Eli PNG from the site, composites the marketplace-style rarity chip onto the image (Telegram can’t do CSS overlays), and posts it with traits plus rank. Same `/api/rarity` data as the site badges. Unminted IDs stay hidden.
 
 Admins can toggle **NFT alerts** on the group home panel. When on, the bot polls the marketplace activity feed and posts the same card for new listings and sales, with a label and price:
 

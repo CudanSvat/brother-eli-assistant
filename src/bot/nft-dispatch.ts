@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { GrammyError } from "grammy";
+import { GrammyError, InputFile } from "grammy";
 import {
   deleteGroup,
   listNftAlertChatIds,
@@ -8,6 +8,7 @@ import {
 } from "../store/db.ts";
 import type { NftAlertEvent } from "../indexer/nft-activity.ts";
 import { eliCaption, eliKeyboard, eliUrls, fetchEliMetadata, fetchEliRarity } from "./eli-card.ts";
+import { renderEliWithRarityBadge } from "./eli-art.ts";
 
 function headlineFor(event: NftAlertEvent): string {
   const price = event.priceLabel ? ` · ${event.priceLabel}` : "";
@@ -60,6 +61,15 @@ export function attachNftDispatcher(bot: Bot) {
 
     const caption = eliCaption(event.tokenId, meta, headlineFor(event), rarity);
     const markup = eliKeyboard(urls);
+    let badged: Buffer | null = null;
+    if (rarity?.tier) {
+      try {
+        badged = await renderEliWithRarityBadge(urls.image, rarity.tier);
+      } catch (error) {
+        console.warn("Eli rarity badge composite failed, sending plain image:", error);
+      }
+    }
+    const fileName = `eli-${event.tokenId}.png`;
 
     for (const chatId of chatIds) {
       const key = postKey(chatId, event);
@@ -67,7 +77,8 @@ export function attachNftDispatcher(bot: Bot) {
       markPosted(key);
 
       try {
-        await bot.api.sendPhoto(chatId, urls.image, {
+        const photo = badged ? new InputFile(badged, fileName) : urls.image;
+        await bot.api.sendPhoto(chatId, photo, {
           caption,
           parse_mode: "HTML",
           reply_markup: markup,

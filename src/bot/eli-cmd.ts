@@ -8,6 +8,7 @@ import {
   fetchEliRarity,
   parseEliId,
 } from "./eli-card.ts";
+import { eliPhotoSource } from "./eli-art.ts";
 
 export function registerEliCommand(bot: Bot): void {
   bot.command("eli", async (ctx) => {
@@ -30,8 +31,9 @@ export function registerEliCommand(bot: Bot): void {
     }
 
     try {
-      // Let Telegram pull the PNG directly — avoids a ~600KB bot download/re-upload.
-      await ctx.replyWithPhoto(urls.image, {
+      // Badge needs a local composite; without rarity Telegram can still fetch the URL.
+      const photo = await eliPhotoSource(urls.image, rarity?.tier, `eli-${id}.png`);
+      await ctx.replyWithPhoto(photo, {
         caption: eliCaption(id, meta, null, rarity),
         parse_mode: "HTML",
         reply_markup: eliKeyboard(urls),
