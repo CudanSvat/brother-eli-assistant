@@ -177,7 +177,10 @@ export function tokenCardText(token: TokenSettings): string {
   ].join("\n");
 }
 
-export function homeKeyboard(tokens: TokenSettings[], dm = false): InlineKeyboard {
+export function homeKeyboard(
+  tokens: TokenSettings[],
+  opts: { dm?: boolean; nftAlerts?: boolean } = {},
+): InlineKeyboard {
   const kb = new InlineKeyboard();
   tokens.forEach((token, i) => {
     kb.text(`${token.symbol}`, `t:view:${token.id}`);
@@ -186,7 +189,9 @@ export function homeKeyboard(tokens: TokenSettings[], dm = false): InlineKeyboar
   if (tokens.length % 2 === 1) kb.row();
   kb.text("+ Add token", "t:add").text("Help", "t:help");
   kb.row();
-  if (dm) kb.text("Switch group", "g:switch");
+  kb.text(opts.nftAlerts ? "NFT alerts: on" : "NFT alerts: off", "t:nft");
+  kb.row();
+  if (opts.dm) kb.text("Switch group", "g:switch");
   kb.text("Close", "t:close");
   return kb;
 }

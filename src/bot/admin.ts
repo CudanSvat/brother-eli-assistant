@@ -15,6 +15,7 @@ import {
   listTokens,
   setAthForAddress,
   setDmSession,
+  setGroupNftAlerts,
   updateToken,
   upsertGroup,
 } from "../store/db.ts";
@@ -133,8 +134,12 @@ async function showHome(ctx: Context, groupId: number, edit = false): Promise<vo
   upsertGroup(groupId, ctx.chat && "title" in ctx.chat && ctx.chat.id === groupId ? ctx.chat.title : undefined);
   const tokens = listTokens(groupId);
   const meta = await groupMeta(ctx, groupId);
+  const group = getGroup(groupId);
   const text = adminHomeText(tokens.length, meta);
-  const markup = homeKeyboard(tokens, isPrivate(ctx));
+  const markup = homeKeyboard(tokens, {
+    dm: isPrivate(ctx),
+    nftAlerts: group?.nftAlerts ?? false,
+  });
   if (edit && ctx.callbackQuery?.message) {
     try {
       await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: markup });
@@ -356,10 +361,22 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
       [
         "Paste a Starknet token address after tapping Add token. Send a GIF in this chat to set the buy animation — no URL needed.",
         "",
+        "NFT alerts: when on, the group gets Brother Eli LISTED / AUCTION LISTED / SOLD / AUCTION SOLD cards (same as /eli, with price).",
+        "",
         "From DMs: paste the group ID (like <code>-1001861431308</code>) or forward a message from the group. Telegram Desktop group links look like t.me/c/<i>id</i>/…",
       ].join("\n"),
       { parse_mode: "HTML" },
     );
+  });
+
+  bot.callbackQuery("t:nft", async (ctx) => {
+    const groupId = await requireAdmin(ctx);
+    if (!groupId) return deny(ctx);
+    const group = getGroup(groupId);
+    const next = !(group?.nftAlerts ?? false);
+    setGroupNftAlerts(groupId, next);
+    await ctx.answerCallbackQuery({ text: next ? "NFT alerts on" : "NFT alerts off" });
+    await showHome(ctx, groupId, true);
   });
 
   bot.callbackQuery("t:add", async (ctx) => {

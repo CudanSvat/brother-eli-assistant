@@ -101,6 +101,13 @@ Anyone can send:
 
 The bot fetches the minted Eli PNG from the site and posts it with the full trait list. Unminted IDs stay hidden.
 
+Admins can toggle **NFT alerts** on the group home panel. When on, the bot polls the marketplace activity feed and posts the same card for new listings and sales, with a label and price:
+
+- `LISTED · …` / `AUCTION LISTED · …`
+- `SOLD · …` / `AUCTION SOLD · …`
+
+Optional env: `MARKETPLACE_API_URL` (defaults to `{ELI_SITE_ORIGIN}/api/eli-marketplace`), `NFT_ACTIVITY_POLL_MS` (default `15000`).
+
 Close the panel with **Close**, **Cancel**, `/cancel`, or `/close`. That also drops any in-progress prompt (GIF, min USD, etc.) so later chat messages are not captured.
 
 ## How detection works
@@ -115,9 +122,9 @@ Close the panel with **Close**, **Cancel**, `/cancel`, or `/close`. That also dr
 ```
 src/
   index.ts            boot
-  bot/                grammy admin panel, cards, send queue
-  indexer/            Ekubo WS + HTTP poll, decode, AVNU netting
-  market/             DexScreener, Ekubo API, GeckoTerminal
+  bot/                grammy admin panel, cards, send queue, /eli + NFT alerts
+  indexer/            Ekubo WS + HTTP poll, NFT marketplace activity poll
+  market/             DexScreener, Ekubo API, GeckoTerminal, marketplace API
   chart/              candlestick PNG
   store/              sqlite
 ```

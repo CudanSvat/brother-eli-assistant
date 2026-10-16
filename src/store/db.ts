@@ -68,6 +68,7 @@ export function openDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS groups (
       chat_id INTEGER PRIMARY KEY,
       title TEXT,
+      nft_alerts INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
 
@@ -128,6 +129,10 @@ export function openDb(): Database.Database {
   if (!cols.some((col) => col.name === "ath_min_usd")) {
     db.exec("ALTER TABLE tokens ADD COLUMN ath_min_usd REAL DEFAULT 0");
   }
+  const groupCols = db.pragma("table_info(groups)") as { name: string }[];
+  if (!groupCols.some((col) => col.name === "nft_alerts")) {
+    db.exec("ALTER TABLE groups ADD COLUMN nft_alerts INTEGER NOT NULL DEFAULT 0");
+  }
   return db;
 }
 
@@ -141,11 +146,30 @@ export function upsertGroup(chatId: number, title?: string): void {
     .run({ chatId, title: title ?? null, createdAt: Date.now() });
 }
 
-export function getGroup(chatId: number): { chatId: number; title: string | null } | undefined {
+export function getGroup(
+  chatId: number,
+): { chatId: number; title: string | null; nftAlerts: boolean } | undefined {
   const row = openDb()
-    .prepare("SELECT chat_id, title FROM groups WHERE chat_id = ?")
-    .get(chatId) as { chat_id: number; title: string | null } | undefined;
-  return row ? { chatId: row.chat_id, title: row.title } : undefined;
+    .prepare("SELECT chat_id, title, nft_alerts FROM groups WHERE chat_id = ?")
+    .get(chatId) as { chat_id: number; title: string | null; nft_alerts: number } | undefined;
+  return row
+    ? { chatId: row.chat_id, title: row.title, nftAlerts: Boolean(row.nft_alerts) }
+    : undefined;
+}
+
+export function setGroupNftAlerts(chatId: number, enabled: boolean): void {
+  openDb()
+    .prepare(
+      `UPDATE groups SET nft_alerts = @enabled WHERE chat_id = @chatId`,
+    )
+    .run({ chatId, enabled: enabled ? 1 : 0 });
+}
+
+export function listNftAlertChatIds(): number[] {
+  const rows = openDb()
+    .prepare("SELECT chat_id FROM groups WHERE nft_alerts = 1")
+    .all() as { chat_id: number }[];
+  return rows.map((row) => row.chat_id);
 }
 
 export function deleteGroup(chatId: number): void {
@@ -159,11 +183,15 @@ export function clearDmSessionsForGroup(chatId: number): void {
   openDb().prepare("DELETE FROM dm_sessions WHERE chat_id = ?").run(chatId);
 }
 
-export function listGroups(): { chatId: number; title: string | null }[] {
+export function listGroups(): { chatId: number; title: string | null; nftAlerts: boolean }[] {
   const rows = openDb()
-    .prepare("SELECT chat_id, title FROM groups ORDER BY created_at DESC")
-    .all() as { chat_id: number; title: string | null }[];
-  return rows.map((row) => ({ chatId: row.chat_id, title: row.title }));
+    .prepare("SELECT chat_id, title, nft_alerts FROM groups ORDER BY created_at DESC")
+    .all() as { chat_id: number; title: string | null; nft_alerts: number }[];
+  return rows.map((row) => ({
+    chatId: row.chat_id,
+    title: row.title,
+    nftAlerts: Boolean(row.nft_alerts),
+  }));
 }
 
 export function getDmSession(userId: number): number | null {

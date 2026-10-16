@@ -5,7 +5,9 @@ import { registerAdmin } from "./bot/admin.ts";
 import { registerChartCommand } from "./bot/chart-cmd.ts";
 import { registerEliCommand } from "./bot/eli-cmd.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
+import { attachNftDispatcher } from "./bot/nft-dispatch.ts";
 import { createProvider, EkuboListener } from "./indexer/listener.ts";
+import { startNftActivityPoller } from "./indexer/nft-activity.ts";
 
 async function main(): Promise<void> {
   assertConfig();
@@ -18,6 +20,7 @@ async function main(): Promise<void> {
   registerChartCommand(bot);
   registerEliCommand(bot);
   const onSwap = attachDispatcher(bot);
+  const onNftAlert = attachNftDispatcher(bot);
   const listener = new EkuboListener(provider, onSwap);
 
   bot.catch((err) => {
@@ -25,6 +28,7 @@ async function main(): Promise<void> {
   });
 
   await listener.start();
+  await startNftActivityPoller(onNftAlert);
   await bot.start({
     onStart: (info) => {
       console.log(`${BOT_NAME} @${info.username} is online`);

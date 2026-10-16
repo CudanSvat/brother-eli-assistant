@@ -7,6 +7,10 @@ const DEFAULT_RPC = "https://api.cartridge.gg/x/starknet/mainnet";
 const rpcUrls = parseRpcUrls(process.env.STARKNET_RPC_URL, process.env.STARKNET_RPC_URLS);
 if (!rpcUrls.length) rpcUrls.push(DEFAULT_RPC);
 
+const eliSiteOrigin = (
+  process.env.ELI_SITE_ORIGIN?.trim() || "https://brother-eli-slay-production.up.railway.app"
+).replace(/\/$/, "");
+
 export const config = {
   telegramToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
   /** Primary RPC (first of {@link rpcUrls}). */
@@ -18,13 +22,17 @@ export const config = {
   /** CoinGecko Onchain / Analyst key unlocks OHLCV beyond the public ~180 day cap. */
   coingeckoApiKey: process.env.COINGECKO_API_KEY?.trim() || process.env.GECKOTERMINAL_API_KEY?.trim() || "",
   /** Origin that serves Brother Eli NFT images/metadata (`/nft/images/:id.png`). */
-  eliSiteOrigin: (
-    process.env.ELI_SITE_ORIGIN?.trim() || "https://brother-eli-slay-production.up.railway.app"
+  eliSiteOrigin,
+  /** Marketplace indexer proxy (`/activity`, `/sales/:id`). */
+  marketplaceApiUrl: (
+    process.env.MARKETPLACE_API_URL?.trim() || `${eliSiteOrigin}/api/eli-marketplace`
   ).replace(/\/$/, ""),
   maxTokensPerGroup: 10,
   /** Quiet window after last hop before flush; receipt enrich still fills gaps. */
   hopFlushMs: 1_500,
   pollIntervalMs: 2_000,
+  /** How often to poll marketplace activity for NFT list/sold alerts. */
+  nftActivityPollMs: Number(process.env.NFT_ACTIVITY_POLL_MS?.trim() || 15_000) || 15_000,
   chartCacheMs: 15_000,
 };
 
