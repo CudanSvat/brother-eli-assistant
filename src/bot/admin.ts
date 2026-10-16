@@ -1,6 +1,6 @@
 import { Bot, type Context, InlineKeyboard } from "grammy";
 import type { RpcProvider } from "starknet";
-import { BOT_NAME, config } from "../config.ts";
+import { BOT_NAME, config, isBotOwner } from "../config.ts";
 import {
   clearDmSession,
   countTokens,
@@ -151,7 +151,8 @@ async function showHome(ctx: Context, groupId: number, edit = false): Promise<vo
   await ctx.reply(text, { parse_mode: "HTML", reply_markup: markup });
 }
 
-async function listReachableGroups(ctx: Context): Promise<{ chatId: number; title: string | null }[]> {
+/** Groups where the bot is still a member. Prunes dead rows from sqlite. */
+async function listBotGroups(ctx: Context): Promise<{ chatId: number; title: string | null }[]> {
   if (!ctx.me) return [];
   const active: { chatId: number; title: string | null }[] = [];
   for (const group of listGroups()) {
@@ -162,7 +163,7 @@ async function listReachableGroups(ctx: Context): Promise<{ chatId: number; titl
         clearDmSessionsForGroup(group.chatId);
         continue;
       }
-      active.push(group);
+      active.push({ chatId: group.chatId, title: group.title });
     } catch {
       deleteGroup(group.chatId);
       clearDmSessionsForGroup(group.chatId);
@@ -171,12 +172,29 @@ async function listReachableGroups(ctx: Context): Promise<{ chatId: number; titl
   return active;
 }
 
+/** Only groups the current user can configure (bot member + user admin). */
+async function listReachableGroups(ctx: Context): Promise<{ chatId: number; title: string | null }[]> {
+  if (!ctx.from) return [];
+  const active: { chatId: number; title: string | null }[] = [];
+  for (const group of await listBotGroups(ctx)) {
+    if (await userIsGroupAdmin(ctx, group.chatId)) active.push(group);
+  }
+  return active;
+}
+
 async function showConnect(ctx: Context, edit = false): Promise<void> {
   if (ctx.from) {
     pending.set(pendingKey(ctx.from.id, ctx.chat!.id), { kind: "connect_group" });
   }
-  const text = connectGroupText();
-  const markup = connectGroupKeyboard(await listReachableGroups(ctx));
+  const botGroups = await listBotGroups(ctx);
+  const mine: { chatId: number; title: string | null }[] = [];
+  for (const group of botGroups) {
+    if (ctx.from && (await userIsGroupAdmin(ctx, group.chatId))) mine.push(group);
+  }
+  const text = connectGroupText(
+    isBotOwner(ctx.from?.id) ? { ownerGroupCount: botGroups.length } : undefined,
+  );
+  const markup = connectGroupKeyboard(mine);
   if (edit && ctx.callbackQuery?.message) {
     try {
       await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: markup });

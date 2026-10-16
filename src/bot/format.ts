@@ -136,15 +136,22 @@ export function adminHomeText(
   ].join("\n");
 }
 
-export function connectGroupText(): string {
-  return [
+export function connectGroupText(opts?: { ownerGroupCount?: number }): string {
+  const lines = [
     `<b>${BOT_NAME}</b>`,
     "Configure a group from this chat — same settings as in the group.",
     "",
-    "You must be a <b>group admin</b>, and I must already be in the group.",
+    "You only see groups where you are an <b>admin</b> and I am already a member.",
     "",
     "Send the group ID (starts with <code>-100</code>), or forward any message from the group here.",
-  ].join("\n");
+  ];
+  if (opts?.ownerGroupCount != null) {
+    lines.push(
+      "",
+      `Owner stats: I am connected to <b>${opts.ownerGroupCount}</b> group${opts.ownerGroupCount === 1 ? "" : "s"} (names hidden; settings still require admin).`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function connectGroupKeyboard(groups: { chatId: number; title: string | null }[]): InlineKeyboard {

@@ -34,7 +34,19 @@ export const config = {
   /** How often to poll marketplace activity for NFT list/sold alerts. */
   nftActivityPollMs: Number(process.env.NFT_ACTIVITY_POLL_MS?.trim() || 15_000) || 15_000,
   chartCacheMs: 15_000,
+  /**
+   * Telegram user ids that may see how many groups the bot is in (count only).
+   * They still cannot open settings for groups where they are not an admin.
+   */
+  botOwnerIds: (process.env.BOT_OWNER_IDS || process.env.BOT_OWNER_ID || "")
+    .split(/[\s,;]+/)
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isSafeInteger(n) && n > 0),
 };
+
+export function isBotOwner(userId: number | undefined | null): boolean {
+  return userId != null && config.botOwnerIds.includes(userId);
+}
 
 export function assertConfig(): void {
   if (!config.telegramToken) {

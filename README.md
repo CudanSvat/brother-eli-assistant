@@ -152,5 +152,6 @@ The bot token lives in `.env` and is gitignored. Production on Railway uses:
 - `STARKNET_RPC_URL` (one or more Alchemy mainnet URLs, comma-separated; set in Railway, never committed)
 - `DATABASE_PATH=/data/brother-eli.db`
 - `NODE_VERSION=20`
+- optional `BOT_OWNER_IDS` — your Telegram user id(s); owners see a **count** of connected groups, not other groups' names or settings
 
 SQLite needs a persistent volume mounted at `/data` or buys/settings reset on every deploy. Start command is `npm start` (Node 20). `better-sqlite3` and the chart canvas package compile native code on install.
