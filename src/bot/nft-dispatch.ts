@@ -7,7 +7,14 @@ import {
   wasPosted,
 } from "../store/db.ts";
 import type { NftAlertEvent } from "../indexer/nft-activity.ts";
-import { eliCaption, eliKeyboard, eliUrls, fetchEliMetadata, fetchEliRarity } from "./eli-card.ts";
+import {
+  eliCaption,
+  eliKeyboard,
+  eliUrls,
+  fetchEliMetadata,
+  fetchEliRarity,
+  resolveEliMarketplaceUrl,
+} from "./eli-card.ts";
 import { renderEliWithRarityBadge } from "./eli-art.ts";
 
 function headlineFor(event: NftAlertEvent): string {
@@ -50,9 +57,10 @@ export function attachNftDispatcher(bot: Bot) {
     if (!chatIds.length) return;
 
     const urls = eliUrls(event.tokenId);
-    const [meta, rarity] = await Promise.all([
+    const [meta, rarity, marketplace] = await Promise.all([
       fetchEliMetadata(urls.metadata),
       fetchEliRarity(event.tokenId),
+      resolveEliMarketplaceUrl(event.tokenId, event.saleId),
     ]);
     if (!meta) {
       console.warn(`NFT alert skip Eli #${event.tokenId}: metadata unavailable`);
@@ -60,7 +68,7 @@ export function attachNftDispatcher(bot: Bot) {
     }
 
     const caption = eliCaption(event.tokenId, meta, headlineFor(event), rarity);
-    const markup = eliKeyboard(urls);
+    const markup = eliKeyboard({ marketplace });
     let badged: Buffer | null = null;
     if (rarity?.tier) {
       try {

@@ -7,8 +7,9 @@ const DEFAULT_RPC = "https://api.cartridge.gg/x/starknet/mainnet";
 const rpcUrls = parseRpcUrls(process.env.STARKNET_RPC_URL, process.env.STARKNET_RPC_URLS);
 if (!rpcUrls.length) rpcUrls.push(DEFAULT_RPC);
 
+/** Origin for Eli NFT assets + deep links (`brothereli.com`; Railway is the same deploy). */
 const eliSiteOrigin = (
-  process.env.ELI_SITE_ORIGIN?.trim() || "https://brother-eli-slay-production.up.railway.app"
+  process.env.ELI_SITE_ORIGIN?.trim() || "https://brothereli.com"
 ).replace(/\/$/, "");
 
 export const config = {
@@ -21,7 +22,6 @@ export const config = {
   databasePath: process.env.DATABASE_PATH?.trim() || "data/brother-eli.db",
   /** CoinGecko Onchain / Analyst key unlocks OHLCV beyond the public ~180 day cap. */
   coingeckoApiKey: process.env.COINGECKO_API_KEY?.trim() || process.env.GECKOTERMINAL_API_KEY?.trim() || "",
-  /** Origin that serves Brother Eli NFT images/metadata (`/nft/images/:id.png`). */
   eliSiteOrigin,
   /** Marketplace indexer proxy (`/activity`, `/sales/:id`). */
   marketplaceApiUrl: (
