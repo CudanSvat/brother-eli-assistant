@@ -7,7 +7,6 @@ import {
   fetchEliMetadata,
   fetchEliRarity,
   parseEliId,
-  resolveEliMarketplaceUrl,
 } from "./eli-card.ts";
 import { eliPhotoSource } from "./eli-art.ts";
 
@@ -22,10 +21,9 @@ export function registerEliCommand(bot: Bot): void {
     }
 
     const urls = eliUrls(id);
-    const [meta, rarity, marketplace] = await Promise.all([
+    const [meta, rarity] = await Promise.all([
       fetchEliMetadata(urls.metadata),
       fetchEliRarity(id),
-      resolveEliMarketplaceUrl(id),
     ]);
     if (!meta) {
       await ctx.reply(`Eli #${id} not found (unminted or unavailable).`);
@@ -38,7 +36,7 @@ export function registerEliCommand(bot: Bot): void {
       await ctx.replyWithPhoto(photo, {
         caption: eliCaption(id, meta, null, rarity),
         parse_mode: "HTML",
-        reply_markup: eliKeyboard({ marketplace }),
+        reply_markup: eliKeyboard(urls),
       });
     } catch (error) {
       console.warn("Eli photo send failed:", error);
