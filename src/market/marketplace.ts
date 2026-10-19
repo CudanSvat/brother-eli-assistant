@@ -17,6 +17,8 @@ export interface MarketplaceActivity {
   status?: number;
   mode?: number;
   price?: string;
+  /** Auctions: live top bid. Prefer over `price` when > 0 (site does the same). */
+  current_bid?: string;
   seller?: string;
   buyer?: string;
   sender?: string;
@@ -29,6 +31,7 @@ export interface MarketplaceSale {
   status: number;
   currency: string;
   price: string;
+  current_bid?: string;
   items?: { index: number; token_id: string }[];
 }
 

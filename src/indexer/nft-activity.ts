@@ -141,9 +141,38 @@ async function resolveSaleContext(event: MarketplaceActivity): Promise<{
   return { tokenIds, auction };
 }
 
+function parseAmount(raw: string | undefined | null): bigint | null {
+  if (raw == null || raw === "") return null;
+  try {
+    return BigInt(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Match brothereli.com display money:
+ * trades → gross; auctions with a bid → current_bid; otherwise asking price.
+ */
 function priceFrom(event: MarketplaceActivity): string | null {
-  const raw = event.gross ?? event.price ?? event.amount;
+  const bid = parseAmount(event.current_bid);
+  const raw =
+    event.gross ??
+    (event.mode === 1 && bid != null && bid > 0n ? event.current_bid : null) ??
+    event.price ??
+    event.amount;
   return formatMarketplaceMoney(raw, event.currency);
+}
+
+/** True when this SaleUpdated is going live as a fresh list, not a bid on an already-live sale. */
+function isFreshListing(event: MarketplaceActivity, before: number | undefined): boolean {
+  if (event.status !== 1 || before === 1) return false;
+  // Draft → live is always a listing.
+  if (before === 0) return true;
+  // Unknown prior status: only treat as listing if there is no top bid yet.
+  // Bids also emit SaleUpdated(status=1); without this they'd look like new listings.
+  const bid = parseAmount(event.current_bid);
+  return bid == null || bid === 0n;
 }
 
 function labelKind(base: "listed" | "sold", auction: boolean): NftAlertKind {
@@ -207,7 +236,7 @@ async function classifyNewEvents(
     if (e.event === "SaleUpdated" && e.id) {
       const before = saleStatus.get(e.id);
       if (e.status !== undefined) saleStatus.set(e.id, e.status);
-      if (e.status === 1 && before !== 1) {
+      if (isFreshListing(e, before)) {
         const { tokenIds, auction } = await resolveSaleContext(e);
         const priceLabel = priceFrom(e);
         for (const tokenId of tokenIds) {
