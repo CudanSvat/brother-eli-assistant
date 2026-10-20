@@ -153,9 +153,17 @@ export function parsePoolUrl(raw: string): string | null {
   return null;
 }
 
-/** GeckoTerminal token page URL. */
+/** GeckoTerminal token page URL, or Brother Eli launchpad token page. */
 export function parseTokenUrl(raw: string): string | null {
-  return geckoHexFromPath(raw, "tokens");
+  const gecko = geckoHexFromPath(raw, "tokens");
+  if (gecko) return gecko;
+  const launchpad = cleanPastedUrl(raw).match(
+    /brothereli\.com\/launchpad\/token\/(0x[0-9a-fA-F]+)/i,
+  );
+  if (launchpad?.[1] && isStarknetAddress(launchpad[1])) {
+    return normalizeAddress(launchpad[1]);
+  }
+  return null;
 }
 
 /** Pool URL or a 0x pool/token address. */

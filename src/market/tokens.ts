@@ -52,18 +52,56 @@ function feltToAscii(value: string): string {
     .trim();
 }
 
-async function callFelt(
+/**
+ * Cairo `ByteArray` return: [data_len, ...31-byte words, pending_word, pending_len].
+ * Older ERC-20s return a single felt252 short-string instead.
+ */
+function decodeFeltOrByteArray(result: string[]): string | null {
+  if (!result.length) return null;
+
+  if (result.length >= 3) {
+    try {
+      const dataLen = Number(BigInt(result[0]!));
+      if (Number.isFinite(dataLen) && dataLen >= 0 && result.length === dataLen + 3) {
+        const parts: Buffer[] = [];
+        let i = 1;
+        for (let w = 0; w < dataLen; w++) {
+          const word = BigInt(result[i++]!);
+          parts.push(Buffer.from(word.toString(16).padStart(62, "0"), "hex"));
+        }
+        const pending = BigInt(result[i++]!);
+        const pendingLen = Number(BigInt(result[i++]!));
+        if (Number.isFinite(pendingLen) && pendingLen > 0 && pendingLen <= 31) {
+          const hex = pending.toString(16).padStart(pendingLen * 2, "0");
+          parts.push(Buffer.from(hex.slice(-pendingLen * 2), "hex"));
+        }
+        const text = Buffer.concat(parts).toString("utf8").replaceAll("\0", "").trim();
+        if (text) return text;
+      }
+    } catch {
+      // fall through to felt252
+    }
+  }
+
+  if (result.length === 1) {
+    const text = feltToAscii(result[0]!);
+    return text || null;
+  }
+  return null;
+}
+
+async function callView(
   provider: RpcProvider,
   address: string,
   entrypoint: string,
-): Promise<string | null> {
+): Promise<string[] | null> {
   try {
     const result = await provider.callContract({
       contractAddress: address,
       entrypoint,
       calldata: [],
     });
-    return result[0] ?? null;
+    return result.map(String);
   } catch {
     return null;
   }
@@ -85,16 +123,16 @@ async function resolveTokenByAddress(
   let decimals = ekubo?.decimals;
 
   if (!symbol) {
-    const felt = await callFelt(provider, address, "symbol");
-    if (felt) symbol = feltToAscii(felt);
+    const raw = await callView(provider, address, "symbol");
+    if (raw) symbol = decodeFeltOrByteArray(raw) ?? undefined;
   }
   if (!name) {
-    const felt = await callFelt(provider, address, "name");
-    if (felt) name = feltToAscii(felt);
+    const raw = await callView(provider, address, "name");
+    if (raw) name = decodeFeltOrByteArray(raw) ?? undefined;
   }
   if (decimals == null) {
-    const felt = await callFelt(provider, address, "decimals");
-    if (felt) decimals = Number(BigInt(felt));
+    const raw = await callView(provider, address, "decimals");
+    if (raw?.[0]) decimals = Number(BigInt(raw[0]));
   }
 
   if (!symbol && !name) return null;
