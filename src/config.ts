@@ -30,7 +30,10 @@ export const config = {
   maxTokensPerGroup: 10,
   /** Quiet window after last hop before flush; receipt enrich still fills gaps. */
   hopFlushMs: 1_500,
-  pollIntervalMs: 2_000,
+  /** HTTP getEvents interval when WebSocket is unavailable (ms). */
+  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS?.trim() || 5_000) || 5_000,
+  /** Slower HTTP backup interval while WebSocket is the primary feed (ms). */
+  pollBackupMs: Number(process.env.POLL_BACKUP_MS?.trim() || 30_000) || 30_000,
   /** How often to poll marketplace activity for NFT list/sold alerts. */
   nftActivityPollMs: Number(process.env.NFT_ACTIVITY_POLL_MS?.trim() || 15_000) || 15_000,
   chartCacheMs: 15_000,

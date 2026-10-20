@@ -2,7 +2,7 @@ import { RpcProvider, WebSocketChannel } from "starknet";
 import { config, EKUBO_CORE, SWAPPED_SELECTOR } from "../config.ts";
 import { allTrackedAddresses, getMeta, setMeta } from "../store/db.ts";
 import { decodeSwapped } from "./decode.ts";
-import { netTransaction } from "./classify.ts";
+import { hopTouchesToken, netTransaction } from "./classify.ts";
 import { normalizeAddress, addressesEqual, sleep } from "../lib/format.ts";
 import { createFailoverFetch } from "../lib/rpc.ts";
 import type { ClassifiedSwap, DecodedSwap } from "../types.ts";
@@ -30,6 +30,10 @@ function swappedSelectorHex(): string {
   return normalizeAddress(`0x${BigInt(SWAPPED_SELECTOR).toString(16)}`);
 }
 
+function hopsTouchTracked(hops: DecodedSwap[], tracked: string[]): boolean {
+  return hops.some((hop) => tracked.some((token) => hopTouchesToken(hop, token)));
+}
+
 export class EkuboListener {
   private readonly pending = new Map<string, PendingTx>();
   private lastBlock = 0;
@@ -38,6 +42,7 @@ export class EkuboListener {
   private flushed = new Set<string>();
   /** While true, hop timers are deferred so pagination can't flush mid-tx. */
   private polling = false;
+  private wsHealthy = false;
   private readonly swappedKey = swappedSelectorHex();
   private readonly ekubo = normalizeAddress(EKUBO_CORE);
 
@@ -55,9 +60,20 @@ export class EkuboListener {
     console.log(`Indexer starting at block ${this.lastBlock} (latest ${latest})`);
 
     if (config.wsUrl) {
-      this.startWebsocket().catch((error) => {
+      try {
+        await this.startWebsocket();
+        this.wsHealthy = true;
+      } catch (error) {
         console.warn("WebSocket indexer failed, using HTTP poll:", error);
-      });
+      }
+    }
+
+    if (this.wsHealthy) {
+      console.log(
+        `HTTP poll backup every ${config.pollBackupMs}ms (WebSocket primary)`,
+      );
+    } else {
+      console.log(`HTTP poll every ${config.pollIntervalMs}ms`);
     }
     this.pollLoop().catch((error) => {
       console.error("HTTP poll loop crashed:", error);
@@ -91,6 +107,11 @@ export class EkuboListener {
     });
   }
 
+  /** Fast poll when HTTP-only; slow backup when WebSocket is the primary feed. */
+  private pollDelayMs(): number {
+    return this.wsHealthy ? config.pollBackupMs : config.pollIntervalMs;
+  }
+
   private async pollLoop(): Promise<void> {
     while (this.running) {
       try {
@@ -98,13 +119,21 @@ export class EkuboListener {
       } catch (error) {
         console.warn("getEvents poll failed:", error);
       }
-      await sleep(config.pollIntervalMs);
+      await sleep(this.pollDelayMs());
     }
   }
 
   private async pollOnce(): Promise<void> {
     const latest = await this.http.getBlockNumber();
     if (latest <= this.lastBlock) return;
+
+    // Nothing to alert on — advance the cursor without getEvents / receipts.
+    if (!allTrackedAddresses().length) {
+      this.lastBlock = latest;
+      setMeta("last_block", String(latest));
+      return;
+    }
+
     const from = this.lastBlock + 1;
     const to = latest;
     let continuationToken: string | undefined;
@@ -160,7 +189,13 @@ export class EkuboListener {
 
   private queueHop(swap: DecodedSwap): void {
     const key = normalizeAddress(swap.transactionHash);
-    if (this.flushed.has(key)) return;
+    if (this.flushed.has(key)) {
+      // Late hop after we dismissed a tx that looked unrelated (e.g. WS delivered
+      // an intermediate hop first). Re-open only if this hop touches a tracked token.
+      const tracked = allTrackedAddresses();
+      if (!tracked.length || !tracked.some((token) => hopTouchesToken(swap, token))) return;
+      this.flushed.delete(key);
+    }
     const existing = this.pending.get(key);
     if (existing) {
       existing.hops.push(swap);
@@ -195,9 +230,17 @@ export class EkuboListener {
     }, config.hopFlushMs);
   }
 
+  private markFlushed(key: string): void {
+    this.flushed.add(key);
+    if (this.flushed.size > 8_000) {
+      this.flushed = new Set([...this.flushed].slice(-4_000));
+    }
+  }
+
   /**
    * Prefer the full tx receipt so AVNU multi-hop routes aren't valued from a
    * partial hop set (HTTP pagination / WS can deliver hops seconds apart).
+   * Only call this when buffered hops already touch a tracked token.
    */
   async hopsFromReceipt(txHash: string, fallback: DecodedSwap[]): Promise<DecodedSwap[]> {
     try {
@@ -232,14 +275,22 @@ export class EkuboListener {
   private async flush(txHash: string, buffered: DecodedSwap[]): Promise<void> {
     const key = normalizeAddress(txHash);
     if (this.flushed.has(key)) return;
-    this.flushed.add(key);
-    if (this.flushed.size > 8_000) {
-      this.flushed = new Set([...this.flushed].slice(-4_000));
+
+    const tracked = allTrackedAddresses();
+    if (!tracked.length) {
+      this.markFlushed(key);
+      return;
     }
 
+    // Skip Alchemy receipt for the vast majority of Ekubo volume that never
+    // touches a token we alert on. Late tracked hops reopen via queueHop.
+    if (!hopsTouchTracked(buffered, tracked)) {
+      this.markFlushed(key);
+      return;
+    }
+
+    this.markFlushed(key);
     const hops = await this.hopsFromReceipt(txHash, buffered);
-    const tracked = allTrackedAddresses();
-    if (!tracked.length) return;
 
     for (const token of tracked) {
       const merged = netTransaction(hops, token);
