@@ -38,7 +38,7 @@ copy .env.example .env
 
 ```
 TELEGRAM_BOT_TOKEN=123456:abc
-STARKNET_RPC_URL=https://starknet-mainnet.g.alchemy.com/v2/KEY1,https://starknet-mainnet.g.alchemy.com/v2/KEY2
+STARKNET_RPC_URL=https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_10/KEY1,https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_10/KEY2
 STARKNET_WS_URL=
 ```
 
