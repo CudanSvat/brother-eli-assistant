@@ -500,17 +500,25 @@ function cacheSeriesPack(key: string, pack: SeriesPack, previous?: SeriesPack): 
 const seriesPackCache = new Map<string, SeriesPack>();
 const seriesPackInflight = new Map<string, Promise<SeriesPack>>();
 
+type SeriesField = keyof Omit<SeriesPack, "at">;
+type SeriesChoice = { field: SeriesField; label: string; intervalSec: number };
+
 /** Preferred candle size per UI window (always pad empty slots to fill the axis). */
-const WINDOW_PLAN: Record<
-  ChartWindow,
-  { field: keyof Omit<SeriesPack, "at">; label: string; intervalSec: number }
-> = {
+const WINDOW_PLAN: Record<ChartWindow, SeriesChoice> = {
   "1d": { field: "mid", label: "15m", intervalSec: 15 * 60 },
   "3d": { field: "hour", label: "1h", intervalSec: 60 * 60 },
   "7d": { field: "hour", label: "1h", intervalSec: 60 * 60 },
   "1m": { field: "day", label: "1d", intervalSec: 24 * 60 * 60 },
+  /** Default for long-lived pools; {@link planForLifetime} may pick finer bars. */
   all: { field: "day", label: "1d", intervalSec: 24 * 60 * 60 },
 };
+
+const CHOICE_MID: SeriesChoice = { field: "mid", label: "15m", intervalSec: 15 * 60 };
+const CHOICE_FINE: SeriesChoice = { field: "fine", label: "5m", intervalSec: 5 * 60 };
+const CHOICE_HOUR: SeriesChoice = { field: "hour", label: "1h", intervalSec: 60 * 60 };
+const CHOICE_DAY: SeriesChoice = { field: "day", label: "1d", intervalSec: 24 * 60 * 60 };
+
+const DAY_SEC = 86_400;
 
 export function isChartWindow(value: string): value is ChartWindow {
   return (CHART_WINDOWS as string[]).includes(value);
@@ -524,6 +532,45 @@ export function chartWindowLabel(window: ChartWindow): string {
 
 function candleSec(c: Candle): number {
   return c.time < 1e12 ? c.time : Math.floor(c.time / 1000);
+}
+
+function seriesSpanSec(candles: Candle[]): number {
+  if (candles.length < 2) return 0;
+  return Math.max(0, candleSec(candles[candles.length - 1]!) - candleSec(candles[0]!));
+}
+
+/** Best-effort pool age from whatever series we already loaded. */
+function packAgeSec(pack: SeriesPack): number {
+  return Math.max(
+    seriesSpanSec(pack.day),
+    seriesSpanSec(pack.hour),
+    seriesSpanSec(pack.mid),
+    seriesSpanSec(pack.fine),
+  );
+}
+
+/**
+ * Young launchpad coins only have a few daily bars — "All" should use denser
+ * candles so the chart isn't three sticks on a black field.
+ * Hourly covers ~8d at our fetch limit; beyond that daily history is better.
+ */
+function planForLifetime(pack: SeriesPack): SeriesChoice[] {
+  const age = packAgeSec(pack);
+  if (age > 0 && age <= 36 * 3_600) {
+    return [CHOICE_MID, CHOICE_FINE, CHOICE_HOUR, CHOICE_DAY];
+  }
+  if (age > 0 && age <= 8.5 * DAY_SEC) {
+    return [CHOICE_HOUR, CHOICE_MID, CHOICE_DAY, CHOICE_FINE];
+  }
+  if (age > 0 && age <= 45 * DAY_SEC) {
+    // Daybars still look sparse under ~1.5 months; prefer hour for the recent
+    // window when daily count is tiny, else full daily history.
+    if (pack.day.length > 0 && pack.day.length < 12 && pack.hour.length >= 4) {
+      return [CHOICE_HOUR, CHOICE_DAY, CHOICE_MID, CHOICE_FINE];
+    }
+    return [CHOICE_DAY, CHOICE_HOUR, CHOICE_MID, CHOICE_FINE];
+  }
+  return [CHOICE_DAY, CHOICE_HOUR, CHOICE_MID, CHOICE_FINE];
 }
 
 function filterByWindow(candles: Candle[], window: ChartWindow): Candle[] {
@@ -782,10 +829,22 @@ async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<Serie
     };
 
     // Fast path: only what this window needs, then return.
-    await loadField(preferField);
-    if (preferField === "hour" && pack.hour.length < 2) await loadField("mid");
-    if (preferField === "mid" && pack.mid.length < 2) await loadField("hour");
-    if (preferField === "day" && pack.day.length < 2) await loadField("hour");
+    if (prefer === "all") {
+      // Lifetime charts need dense bars for young coins and daily for old ones.
+      await Promise.all([loadField("hour"), loadField("day")]);
+      const age = packAgeSec(pack);
+      if (age > 0 && age <= 36 * 3_600) await loadField("mid");
+      if (age > 0 && age <= 12 * 3_600) await loadField("fine");
+    } else {
+      await loadField(preferField);
+      if (preferField === "hour" && pack.hour.length < 2) await loadField("mid");
+      if (preferField === "mid" && pack.mid.length < 2) await loadField("hour");
+      if (preferField === "day" && pack.day.length < 2) await loadField("hour");
+      // 1M on a brand-new pool: daily is still empty/sparse — pull hour.
+      if (prefer === "1m" && pack.day.length > 0 && pack.day.length < 8) {
+        await loadField("hour");
+      }
+    }
 
     cacheSeriesPack(key, pack, hit);
     if (!seriesPackHasData(pack) && hit && seriesPackHasData(hit)) return hit;
@@ -793,7 +852,8 @@ async function loadSeriesPack(pool: string, prefer?: ChartWindow): Promise<Serie
     // Warm remaining series in the background (don't block the chart).
     void (async () => {
       for (const field of ["hour", "mid", "day", "fine"] as const) {
-        if (field === preferField) continue;
+        if (prefer === "all" && (field === "hour" || field === "day")) continue;
+        if (prefer !== "all" && field === preferField) continue;
         await loadField(field);
         cacheSeriesPack(key, pack, hit);
       }
@@ -813,13 +873,12 @@ function pickSeriesForWindow(
   window: ChartWindow,
 ): { candles: Candle[]; intervalLabel: string } {
   const plan = WINDOW_PLAN[window];
-  const fallbacks: Array<{ field: keyof Omit<SeriesPack, "at">; label: string; intervalSec: number }> = [
-    plan,
-    { field: "hour", label: "1h", intervalSec: 60 * 60 },
-    { field: "mid", label: "15m", intervalSec: 15 * 60 },
-    { field: "fine", label: "5m", intervalSec: 5 * 60 },
-    { field: "day", label: "1d", intervalSec: 24 * 60 * 60 },
-  ];
+  const fallbacks: SeriesChoice[] =
+    window === "all"
+      ? planForLifetime(pack)
+      : window === "1m" && pack.day.length > 0 && pack.day.length < 8
+        ? [CHOICE_HOUR, CHOICE_MID, CHOICE_DAY, CHOICE_FINE]
+        : [plan, CHOICE_HOUR, CHOICE_MID, CHOICE_FINE, CHOICE_DAY];
 
   for (const choice of fallbacks) {
     const series = pack[choice.field];

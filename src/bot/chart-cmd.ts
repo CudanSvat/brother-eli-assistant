@@ -124,7 +124,11 @@ async function buildChart(
       market?.priceUsd ??
       token.lastPriceUsd ??
       (lastClose != null && Number.isFinite(lastClose) && lastClose > 0 ? lastClose : null);
-    const allNote = window === "all" && !config.coingeckoApiKey ? " · public API ~180d max" : "";
+    // Only mention the ~180d public cap when All is actually on daily history.
+    const allNote =
+      window === "all" && label === "1d" && !config.coingeckoApiKey
+        ? " · public API ~180d max"
+        : "";
     return {
       png,
       caption: [
