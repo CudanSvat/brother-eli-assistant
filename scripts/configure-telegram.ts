@@ -30,6 +30,8 @@ async function main() {
     commands: [
       { command: "start", description: "Open the admin panel in a group" },
       { command: "settings", description: "Token settings" },
+      { command: "chart", description: "Live candlestick for a tracked token" },
+      { command: "shill", description: "Share card with MC + launchpad link" },
       { command: "help", description: "How Brother Eli Assistant works" },
     ],
   });

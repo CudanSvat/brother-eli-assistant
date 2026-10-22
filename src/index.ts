@@ -4,6 +4,7 @@ import { openDb, bumpAthForAddress } from "./store/db.ts";
 import { registerAdmin } from "./bot/admin.ts";
 import { registerChartCommand } from "./bot/chart-cmd.ts";
 import { registerEliCommand } from "./bot/eli-cmd.ts";
+import { registerShillCommand } from "./bot/shill-cmd.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
 import { attachNftDispatcher } from "./bot/nft-dispatch.ts";
 import { createProvider, EkuboListener } from "./indexer/listener.ts";
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
   registerAdmin(bot, provider);
   registerChartCommand(bot);
   registerEliCommand(bot);
+  registerShillCommand(bot);
   const onSwap = attachDispatcher(bot);
   const onNftAlert = attachNftDispatcher(bot);
   const listener = new EkuboListener(provider, onSwap);
