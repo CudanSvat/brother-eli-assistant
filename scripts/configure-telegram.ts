@@ -31,7 +31,7 @@ async function main() {
       { command: "start", description: "Open the admin panel in a group" },
       { command: "settings", description: "Token settings" },
       { command: "chart", description: "Live candlestick for a tracked token" },
-      { command: "shill", description: "Share card with MC + launchpad link" },
+      { command: "shill", description: "$DEGENZ launchpad share card" },
       { command: "help", description: "How Brother Eli Assistant works" },
     ],
   });

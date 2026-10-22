@@ -71,6 +71,11 @@ export const STRK_TOKEN =
 /** SLAY token — charts and Gecko links always use the fixed pool below. */
 export const SLAY_TOKEN =
   "0x02ab526354a39e7f5d272f327fa94e757df3688188d4a92c6dc3623ab79894e2";
+
+/** Starknet Degenz — /shill share card is DEGENZ-only. */
+export const DEGENZ_TOKEN =
+  process.env.DEGENZ_TOKEN?.trim() ||
+  "0x049092ff7929ee84fec51b8f1658cea5083d6c83dbc18d7b106d8c7d2389b100";
 export const SLAY_CHART_POOL =
   process.env.SLAY_CHART_POOL?.trim() ||
   "0x05a3febaff513632474af45ede4b0490af55195e201c3b3a67b2edd11afbb6bf";
