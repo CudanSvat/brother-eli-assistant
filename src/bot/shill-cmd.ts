@@ -31,7 +31,7 @@ function shillKeyboard(coin: LaunchpadToken): InlineKeyboard {
     .url("Launchpad", launchpadTokenUrl(addr))
     .url("Ekubo", ekuboSwapUrl(addr))
     .row()
-    .url("AVNU", avnuSwapUrl(addr, coin.symbol));
+    .url("AVNU", avnuSwapUrl(addr, coin.symbol, "strk"));
 }
 
 function argLooksLikeDegenz(arg: string): boolean {

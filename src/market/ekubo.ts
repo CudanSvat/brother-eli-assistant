@@ -62,10 +62,18 @@ export function ekuboSwapUrl(tokenAddress: string): string {
   return `https://ekubo.org/swap?outputCurrency=${token}&amount=1&inputCurrency=${eth}`;
 }
 
-export function avnuSwapUrl(tokenAddress: string, symbol?: string): string {
+/**
+ * AVNU deep link by contract only.
+ * Don't pass buyToken=&lt;symbol&gt; — unknown tickers blank the swap UI for users
+ * who haven't touched that token yet (e.g. DEGENZ before AVNU indexes the name).
+ */
+export function avnuSwapUrl(
+  tokenAddress: string,
+  _symbol?: string,
+  sellToken: "eth" | "strk" = "eth",
+): string {
   const token = normalizeAddress(tokenAddress);
-  const buy = (symbol || "token").toLowerCase().replace(/[^a-z0-9]/g, "") || "token";
-  return `https://app.avnu.fi/en?tokenTo=${token}&sellToken=eth&buyToken=${buy}`;
+  return `https://app.avnu.fi/en?tokenTo=${token}&sellToken=${sellToken}`;
 }
 
 export function starkscanTxUrl(hash: string): string {
