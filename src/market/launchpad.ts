@@ -113,15 +113,26 @@ async function fetchTokens(q: string): Promise<LaunchpadToken[]> {
   return (body.rows ?? []).map(mapRow).filter((t): t is LaunchpadToken => Boolean(t));
 }
 
-/** Lookup a launchpad coin by contract address (canonical). */
+/**
+ * Lookup a launchpad coin by contract address.
+ * Query with the padded form — compact (leading-zero stripped) returns no rows.
+ */
 export async function getLaunchpadTokenByAddress(address: string): Promise<LaunchpadToken | null> {
   const key = normalizeAddress(address);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
 
   try {
-    const rows = await fetchTokens(compactAddress(key));
-    const exact = rows.find((r) => addressesEqual(r.address, key)) ?? null;
+    // Prefer padded 0x0… form; also try compact in case the indexer stores it that way.
+    let rows = await fetchTokens(key);
+    let exact = rows.find((r) => addressesEqual(r.address, key)) ?? null;
+    if (!exact) {
+      const compact = compactAddress(key);
+      if (compact.toLowerCase() !== key.toLowerCase()) {
+        rows = await fetchTokens(compact);
+        exact = rows.find((r) => addressesEqual(r.address, key)) ?? null;
+      }
+    }
     cache.set(key, { at: Date.now(), value: exact });
     return exact;
   } catch (error) {
@@ -129,6 +140,25 @@ export async function getLaunchpadTokenByAddress(address: string): Promise<Launc
     cache.set(key, { at: Date.now(), value: null });
     return null;
   }
+}
+
+/** Resolve a tracked bot token against the launchpad (address first, then symbol). */
+export async function resolveLaunchpadForTracked(token: {
+  address: string;
+  symbol: string;
+}): Promise<LaunchpadToken | null> {
+  const byAddr = await getLaunchpadTokenByAddress(token.address);
+  if (byAddr) return byAddr;
+  const bySymbol = await searchLaunchpadToken(token.symbol);
+  if (!bySymbol) return null;
+  // Only accept symbol match when addresses agree, or when the tracked
+  // address was a near-miss (different padding) — already handled above.
+  // If the group tracked a different contract under the same ticker, skip.
+  if (addressesEqual(bySymbol.address, token.address)) return bySymbol;
+  // Tracked CA might differ from launchpad (manual add / wrong paste).
+  // Prefer launchpad record when symbol matches exactly — that's the shill target.
+  if (bySymbol.symbol.toLowerCase() === token.symbol.toLowerCase()) return bySymbol;
+  return null;
 }
 
 /** Search launchpad discover by symbol / name / address. */

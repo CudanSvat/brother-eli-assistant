@@ -9,8 +9,8 @@ import {
 } from "../lib/format.ts";
 import { avnuSwapUrl, ekuboSwapUrl } from "../market/ekubo.ts";
 import {
-  getLaunchpadTokenByAddress,
   launchpadTokenUrl,
+  resolveLaunchpadForTracked,
   type LaunchpadToken,
 } from "../market/launchpad.ts";
 import { getDmSession, getToken, listTokens } from "../store/db.ts";
@@ -72,7 +72,7 @@ async function buildShill(token: TokenSettings): Promise<
   | { ok: true; png: Buffer; caption: string; coin: LaunchpadToken }
   | { ok: false; reason: "not_on_launchpad" | "build_failed" }
 > {
-  const coin = await getLaunchpadTokenByAddress(token.address);
+  const coin = await resolveLaunchpadForTracked(token);
   if (!coin) return { ok: false, reason: "not_on_launchpad" };
 
   try {
