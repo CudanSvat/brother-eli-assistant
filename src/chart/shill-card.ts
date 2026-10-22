@@ -571,11 +571,15 @@ export async function renderShillCardPng(input: ShillCardInput): Promise<Buffer>
   ctx.textBaseline = "middle";
   ctx.fillText(change.text, midX + (change.up == null ? 0 : gap / 2), moveY);
 
-  drawStatsBar(ctx, paperX + 24, barY, paperW - 48, [
+  const stats: { label: string; value: string }[] = [
     { label: "PRICE", value: formatTokenPrice(input.priceUsd) },
-    { label: "HOLDERS", value: formatHolders(input.holders) },
-    { label: "VOLUME", value: formatUsd(input.volumeUsd) },
-  ]);
+  ];
+  // Launchpad leaves holders at 0 for some coins (e.g. SLAY) — omit rather than show 0.
+  if (input.holders != null && Number.isFinite(input.holders) && input.holders > 0) {
+    stats.push({ label: "HOLDERS", value: formatHolders(input.holders) });
+  }
+  stats.push({ label: "VOLUME", value: formatUsd(input.volumeUsd) });
+  drawStatsBar(ctx, paperX + 24, barY, paperW - 48, stats);
 
   drawFooterBanner(ctx, 40, footerY, WIDTH - 80, footerH);
 

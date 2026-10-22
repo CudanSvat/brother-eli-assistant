@@ -63,11 +63,6 @@ function shillKeyboard(coin: LaunchpadToken): InlineKeyboard {
     .url("AVNU", avnuSwapUrl(addr, coin.symbol));
 }
 
-function formatHoldersCaption(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return Math.round(value).toLocaleString("en-US");
-}
-
 async function buildShill(token: TokenSettings): Promise<
   | { ok: true; png: Buffer; caption: string; coin: LaunchpadToken }
   | { ok: false; reason: "not_on_launchpad" | "build_failed" }
@@ -92,12 +87,19 @@ async function buildShill(token: TokenSettings): Promise<
     const launchUrl = launchpadTokenUrl(coin.address);
     const ca = normalizeAddress(coin.address);
     const move = formatPct(coin.change24h);
+    const hasHolders = coin.holders != null && Number.isFinite(coin.holders) && coin.holders > 0;
+    const metaLine = [
+      hasHolders ? `Holders ${Math.round(coin.holders!).toLocaleString("en-US")}` : null,
+      `Vol ${formatUsd(coin.volumeUsd)}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
     const caption = [
       `<b>$${escapeHtml(coin.symbol)}</b> · ${escapeHtml(coin.name)}`,
       `CA: <code>${escapeHtml(ca)}</code>`,
       "",
       `MC ${formatUsd(coin.marketCap)} · Price ${formatTokenPrice(coin.priceUsd)}${move ? ` · 24h ${move}` : ""}`,
-      `Holders ${formatHoldersCaption(coin.holders)} · Vol ${formatUsd(coin.volumeUsd)}`,
+      metaLine,
       "",
       `<a href="${launchUrl}">Open on launchpad</a>`,
     ].join("\n");
