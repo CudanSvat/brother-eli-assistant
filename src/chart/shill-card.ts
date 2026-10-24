@@ -2,6 +2,7 @@ import { createCanvas, GlobalFonts, loadImage, type Image, type SKRSContext2D } 
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { formatBurnAmount } from "../market/burn.ts";
 import { formatTokenPrice, formatUsd, normalizeAddress } from "../lib/format.ts";
 
 const WIDTH = 760;
@@ -39,6 +40,8 @@ export interface ShillCardInput {
   volumeUsd: number | null;
   change24h: number | null;
   holders: number | null;
+  /** Whole-token units burned (balance at 0x…dEaD). */
+  burned?: number | null;
   at?: Date;
 }
 
@@ -574,8 +577,10 @@ export async function renderShillCardPng(input: ShillCardInput): Promise<Buffer>
   const stats: { label: string; value: string }[] = [
     { label: "PRICE", value: formatTokenPrice(input.priceUsd) },
   ];
-  // Launchpad leaves holders at 0 for some coins (e.g. SLAY) — omit rather than show 0.
-  if (input.holders != null && Number.isFinite(input.holders) && input.holders > 0) {
+  // Prefer burned over holders on the card when both exist (holders stay in the caption).
+  if (input.burned != null && Number.isFinite(input.burned) && input.burned > 0) {
+    stats.push({ label: "BURNED", value: formatBurnAmount(input.burned) });
+  } else if (input.holders != null && Number.isFinite(input.holders) && input.holders > 0) {
     stats.push({ label: "HOLDERS", value: formatHolders(input.holders) });
   }
   stats.push({ label: "VOLUME", value: formatUsd(input.volumeUsd) });

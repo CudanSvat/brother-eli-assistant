@@ -341,6 +341,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         "You must be a group admin either way. Alerts still post in the group.",
         "Anyone: /chart for a live candlestick (tap 1d / 3d / 7d / 1M / All to refresh).",
         "Anyone: /shill for the $DEGENZ launchpad share card.",
+        "Burn digests: groups tracking $DEGENZ get an hourly summary when burns happen (not every tiny burn).",
         "Tap Close or send /cancel to exit the panel. Members just watch the feed.",
         "",
         "<b>Step</b> = USD per emoji. $50 step and a $250 buy → 5 emojis.",

@@ -76,6 +76,22 @@ export const SLAY_TOKEN =
 export const DEGENZ_TOKEN =
   process.env.DEGENZ_TOKEN?.trim() ||
   "0x049092ff7929ee84fec51b8f1658cea5083d6c83dbc18d7b106d8c7d2389b100";
+
+/**
+ * Launchpad burn sink (same as brother-eli-slay `BURN_ADDRESS = normalizeAddress("0xdead")`).
+ * Memecoin "Burned" on the token page is this address's balance.
+ */
+export const BURN_ADDRESS = "0x000000000000000000000000000000000000000000000000000000000000dead";
+
+/** How often to post a burn digest (avoids spam from many tiny burns). Override via BURN_DIGEST_MS. */
+export const BURN_DIGEST_MS = (() => {
+  const raw = process.env.BURN_DIGEST_MS?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 60_000) return n;
+  }
+  return 60 * 60_000; // 1 hour
+})();
 export const SLAY_CHART_POOL =
   process.env.SLAY_CHART_POOL?.trim() ||
   "0x05a3febaff513632474af45ede4b0490af55195e201c3b3a67b2edd11afbb6bf";

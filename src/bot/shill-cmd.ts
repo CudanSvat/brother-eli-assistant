@@ -1,4 +1,5 @@
 import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
+import type { RpcProvider } from "starknet";
 import { DEGENZ_TOKEN } from "../config.ts";
 import { loadShillImage, renderShillCardPng } from "../chart/shill-card.ts";
 import {
@@ -9,6 +10,7 @@ import {
   formatUsd,
   normalizeAddress,
 } from "../lib/format.ts";
+import { formatBurnAmount, getBurnedRaw, rawToUnits } from "../market/burn.ts";
 import { avnuSwapUrl, ekuboSwapUrl } from "../market/ekubo.ts";
 import {
   getLaunchpadTokenByAddress,
@@ -17,6 +19,8 @@ import {
   type LaunchpadToken,
 } from "../market/launchpad.ts";
 import { getDmSession } from "../store/db.ts";
+
+let burnProvider: RpcProvider | null = null;
 
 function resolveGroupId(ctx: Context): number | null {
   if (!ctx.chat) return null;
@@ -56,6 +60,8 @@ async function buildDegenzShill(): Promise<
   if (!coin) return { ok: false, reason: "not_found" };
 
   try {
+    const burnedRaw = burnProvider ? await getBurnedRaw(burnProvider, coin.address) : 0n;
+    const burnedUnits = rawToUnits(burnedRaw, 18);
     const image = await loadShillImage(coin.logo);
     const png = await renderShillCardPng({
       symbol: coin.symbol,
@@ -67,6 +73,7 @@ async function buildDegenzShill(): Promise<
       volumeUsd: coin.volumeUsd,
       change24h: coin.change24h,
       holders: coin.holders,
+      burned: burnedUnits > 0 ? burnedUnits : null,
     });
 
     const launchUrl = launchpadTokenUrl(coin.address);
@@ -75,6 +82,7 @@ async function buildDegenzShill(): Promise<
     const hasHolders = coin.holders != null && Number.isFinite(coin.holders) && coin.holders > 0;
     const metaLine = [
       hasHolders ? `Holders ${Math.round(coin.holders!).toLocaleString("en-US")}` : null,
+      burnedUnits > 0 ? `Burned ${formatBurnAmount(burnedUnits)}` : null,
       `Vol ${formatUsd(coin.volumeUsd)}`,
     ]
       .filter(Boolean)
@@ -128,7 +136,8 @@ async function sendDegenzShill(ctx: Context): Promise<void> {
   });
 }
 
-export function registerShillCommand(bot: Bot): void {
+export function registerShillCommand(bot: Bot, provider?: RpcProvider): void {
+  burnProvider = provider ?? null;
   bot.command("shill", async (ctx) => {
     if (!ctx.chat) return;
     const groupId = resolveGroupId(ctx);
