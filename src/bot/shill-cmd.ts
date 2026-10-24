@@ -154,13 +154,8 @@ export function registerShillCommand(bot: Bot, provider?: RpcProvider): void {
       return;
     }
 
-    if (!groupTracksDegenz(groupId)) {
-      await ctx.reply(
-        "/shill is only available in groups that track <b>$DEGENZ</b>. Add it in the admin panel first.",
-        { parse_mode: "HTML" },
-      );
-      return;
-    }
+    // Silent no-op outside DEGENZ-tracked groups (e.g. Brother Eli / SLAY-only chats).
+    if (!groupTracksDegenz(groupId)) return;
 
     const arg = ctx.match?.trim() || "";
     if (!argLooksLikeDegenz(arg)) {
