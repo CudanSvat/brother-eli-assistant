@@ -340,7 +340,7 @@ export function registerAdmin(bot: Bot, provider: RpcProvider): void {
         "Admins: open /start in the group, or DM me and paste the group ID (starts with -100).",
         "You must be a group admin either way. Alerts still post in the group.",
         "Anyone: /chart for a live candlestick (tap 1d / 3d / 7d / 1M / All to refresh).",
-        "Anyone: /shill for the $DEGENZ launchpad share card.",
+        "Anyone: /shill for the $DEGENZ launchpad share card (only in groups that track $DEGENZ).",
         "Burn digests: groups tracking $DEGENZ get an hourly summary when burns happen (not every tiny burn).",
         "Tap Close or send /cancel to exit the panel. Members just watch the feed.",
         "",

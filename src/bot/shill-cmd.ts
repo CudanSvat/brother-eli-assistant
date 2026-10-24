@@ -18,7 +18,7 @@ import {
   searchLaunchpadToken,
   type LaunchpadToken,
 } from "../market/launchpad.ts";
-import { getDmSession } from "../store/db.ts";
+import { getDmSession, listTokens } from "../store/db.ts";
 
 let burnProvider: RpcProvider | null = null;
 
@@ -44,6 +44,10 @@ function argLooksLikeDegenz(arg: string): boolean {
   if (q === "degenz" || q === "starknet degenz") return true;
   if (/^0x[0-9a-f]+$/i.test(q) && addressesEqual(q, DEGENZ_TOKEN)) return true;
   return false;
+}
+
+function groupTracksDegenz(chatId: number): boolean {
+  return listTokens(chatId).some((t) => addressesEqual(t.address, DEGENZ_TOKEN));
 }
 
 async function loadDegenz(): Promise<LaunchpadToken | null> {
@@ -82,7 +86,7 @@ async function buildDegenzShill(): Promise<
     const hasHolders = coin.holders != null && Number.isFinite(coin.holders) && coin.holders > 0;
     const metaLine = [
       hasHolders ? `Holders ${Math.round(coin.holders!).toLocaleString("en-US")}` : null,
-      burnedUnits > 0 ? `Burned ${formatBurnAmount(burnedUnits)}` : null,
+      burnedUnits > 0 ? `Burned ${formatBurnAmount(burnedUnits)} $${coin.symbol}` : null,
       `Vol ${formatUsd(coin.volumeUsd)}`,
     ]
       .filter(Boolean)
@@ -146,6 +150,14 @@ export function registerShillCommand(bot: Bot, provider?: RpcProvider): void {
         ctx.chat.type === "private"
           ? "Connect a group first (/start → paste group ID), then /shill."
           : "No group context.",
+      );
+      return;
+    }
+
+    if (!groupTracksDegenz(groupId)) {
+      await ctx.reply(
+        "/shill is only available in groups that track <b>$DEGENZ</b>. Add it in the admin panel first.",
+        { parse_mode: "HTML" },
       );
       return;
     }
