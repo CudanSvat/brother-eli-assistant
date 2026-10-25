@@ -1,10 +1,27 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Bot } from "grammy";
+import { InputFile } from "grammy";
 import type { RpcProvider } from "starknet";
 import { config } from "../config.ts";
 import { getMeta, setMeta } from "../store/db.ts";
 import { notifyWheelOwners } from "./notify.ts";
 import { runWheelSpin } from "./run.ts";
 import { resolveWheelTargetChatIds } from "./targets.ts";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+function launchImagePath(): string | null {
+  const candidates = [
+    path.join(here, "../../assets/eli-selects-launch.jpg"),
+    path.join(process.cwd(), "assets/eli-selects-launch.jpg"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
 
 const META_LAUNCH_DONE = "wheel_launch_done";
 const META_NEXT_AT = "wheel_next_at_ms";
@@ -148,9 +165,17 @@ export async function runWheelLaunchSequence(
     const chatIds = await targetChats(bot);
     if (!chatIds.length) return { ok: false, error: "no_chats" };
 
+    const imagePath = launchImagePath();
     for (const chatId of chatIds) {
       try {
-        await bot.api.sendMessage(chatId, WHEEL_LAUNCH_INTRO);
+        if (imagePath) {
+          await bot.api.sendPhoto(chatId, new InputFile(imagePath, "eli-selects-launch.jpg"), {
+            caption: WHEEL_LAUNCH_INTRO,
+          });
+        } else {
+          console.warn("Wheel launch image missing; sending text-only intro");
+          await bot.api.sendMessage(chatId, WHEEL_LAUNCH_INTRO);
+        }
       } catch (error) {
         console.warn(`Wheel launch intro failed for ${chatId}:`, error);
       }
