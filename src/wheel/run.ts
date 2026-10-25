@@ -147,8 +147,8 @@ export async function runWheelSpin(
         videoPath: null,
       }) ?? spin;
 
-    // Let the video play a bit before revealing in the caption (edit).
-    await pause(videoPath ? 8_000 : 1_500);
+    // Wait through spin + winner hold before editing the caption (reel is ~11s).
+    await pause(videoPath ? 11_000 : 1_500);
 
     let payoutNote: string;
     if (!spin.hasWinner || !spin.ownerAddress || spin.prizeSlay == null) {

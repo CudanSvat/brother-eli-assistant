@@ -79,6 +79,11 @@ export const CobaltReel: React.FC<WheelProps> = ({
     to: 1,
     durationInFrames: 20,
   });
+  // Soft pulse while holding the still ending so the freeze doesn’t feel dead
+  const holdPulse =
+    frame > revealStart + 20
+      ? interpolate(frame % 40, [0, 20, 40], [1, 1.03, 1])
+      : 1;
 
   const arrowPulse =
     frame >= SPIN_START && frame <= SPIN_END
@@ -347,7 +352,7 @@ export const CobaltReel: React.FC<WheelProps> = ({
               winner={winner}
               prizeLine={prizeLine}
               opacity={winnerOp}
-              scale={winnerScale}
+              scale={winnerScale * holdPulse}
             />
           </div>
         </div>
