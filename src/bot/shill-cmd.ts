@@ -105,7 +105,7 @@ async function buildDegenzShill(): Promise<
     const caption = [
       `<b>$${escapeHtml(coin.symbol)}</b> · ${escapeHtml(coin.name)}`,
       `CA: <code>${escapeHtml(ca)}</code>`,
-      `Burn: <code>${escapeHtml(burnAddr)}</code>`,
+      `Burn address: <code>${escapeHtml(burnAddr)}</code>`,
       "",
       `MC ${formatUsd(coin.marketCap)} · Price ${formatTokenPrice(coin.priceUsd)}${move ? ` · 24h ${move}` : ""}`,
       metaLine,

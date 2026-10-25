@@ -52,7 +52,7 @@ async function digestCaption(event: BurnDigestEvent): Promise<string> {
     "",
     `Another <b>${escapeHtml(amount)}</b> ${escapeHtml(watch.symbol)}${escapeHtml(usdSuffix(amountUnits, priceUsd))} burned since last check (${escapeHtml(burns)}).`,
     `Total burned: <b>${escapeHtml(total)}</b>${escapeHtml(usdSuffix(totalUnits, priceUsd))}`,
-    `Burn: <code>${escapeHtml(burnAddr)}</code>`,
+    `Burn address: <code>${escapeHtml(burnAddr)}</code>`,
     "",
     `<a href="${launchUrl}">Open on launchpad</a>`,
   ].join("\n");
