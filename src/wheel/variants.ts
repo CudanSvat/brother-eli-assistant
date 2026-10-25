@@ -1,7 +1,5 @@
 export const WHEEL_VARIANTS = {
   reel: "CobaltReel",
-  wheel: "PaperWheel",
-  bag: "SlayBagDraw",
   stamp: "StampPress",
 } as const;
 
@@ -27,5 +25,5 @@ export function resolveCompositionId(key: WheelVariantKey | "random"): {
 }
 
 export function variantHelp(): string {
-  return "Usage: /wheel_test [reel|wheel|bag|stamp|random]";
+  return "Usage: /wheel_test [reel|stamp|random]";
 }
