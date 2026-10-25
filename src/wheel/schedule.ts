@@ -5,7 +5,7 @@ import type { Bot } from "grammy";
 import { InputFile } from "grammy";
 import type { RpcProvider } from "starknet";
 import { config } from "../config.ts";
-import { getMeta, setMeta } from "../store/db.ts";
+import { getLatestWheelSpin, getMeta, setMeta } from "../store/db.ts";
 import { notifyWheelOwners } from "./notify.ts";
 import { runWheelSpin } from "./run.ts";
 import { resolveWheelTargetChatIds } from "./targets.ts";
@@ -145,6 +145,16 @@ function writeNextAt(when: Date): void {
   setMeta(META_NEXT_AT, String(when.getTime()));
 }
 
+function ensureFutureNextAt(after: Date = new Date()): Date {
+  const existing = readNextAt();
+  if (existing != null && existing > after.getTime() + 5_000) {
+    return new Date(existing);
+  }
+  const next = pickNextDailyDrawAfter(after);
+  writeNextAt(next);
+  return next;
+}
+
 function randomLaunchDelayMs(): number {
   return (
     LAUNCH_DELAY_MIN_MS +
@@ -178,11 +188,33 @@ async function postLaunchIntro(bot: Bot, chatIds: number[]): Promise<void> {
   }
 }
 
+/**
+ * If intro already went out and a spin row exists, treat launch as done.
+ * Prevents a second launch spin after crash/redeploy mid-sequence.
+ */
+function recoverCompletedLaunch(): number | null {
+  if (isWheelLaunchDone()) return null;
+  if (getMeta(META_LAUNCH_INTRO_SENT) !== "1") return null;
+  const existing = getLatestWheelSpin();
+  if (!existing) return null;
+  markWheelLaunchDone();
+  ensureFutureNextAt(new Date());
+  console.log(
+    `Wheel: recovered launch as already done (spin #${existing.id}); next=${new Date(readNextAt()!).toISOString()}`,
+  );
+  return existing.id;
+}
+
 /** Post intro → wait 5–15 min → forced-win spin (no smallest prize). */
 export async function runWheelLaunchSequence(
   bot: Bot,
   provider: RpcProvider,
 ): Promise<{ ok: true; spinId: number } | { ok: false; error: string }> {
+  const recovered = recoverCompletedLaunch();
+  if (recovered != null) return { ok: true, spinId: recovered };
+  if (isWheelLaunchDone()) {
+    return { ok: false, error: "launch_already_done" };
+  }
   if (running) return { ok: false, error: "busy" };
   running = true;
   try {
@@ -217,6 +249,11 @@ export async function runWheelLaunchSequence(
     const waitMs = Math.max(0, spinAt - Date.now());
     if (waitMs > 0) await pause(waitMs);
 
+    // Re-check after wait (redeploy/crash may have finished the spin elsewhere)
+    const recoveredAfterWait = recoverCompletedLaunch();
+    if (recoveredAfterWait != null) return { ok: true, spinId: recoveredAfterWait };
+    if (isWheelLaunchDone()) return { ok: false, error: "launch_already_done" };
+
     const result = await runWheelSpin(bot, provider, {
       chatIds,
       showStatus: false,
@@ -226,8 +263,7 @@ export async function runWheelLaunchSequence(
 
     if (result.ok) {
       markWheelLaunchDone();
-      const next = pickNextDailyDrawAfter(new Date());
-      writeNextAt(next);
+      const next = ensureFutureNextAt(new Date());
       console.log(`Wheel: launch spin #${result.spinId}; next daily ${next.toISOString()}`);
     }
     return result;
@@ -270,9 +306,48 @@ async function runScheduledDaily(
 }
 
 /**
+ * Arm clock without sending anything on boot.
+ * Redeploy keeps the stored next draw time when it is still in the future.
+ */
+function armSchedulerClock(): void {
+  recoverCompletedLaunch();
+
+  if (isWheelLaunchDone()) {
+    const next = ensureFutureNextAt(new Date());
+    console.log(
+      `Wheel scheduler: armed next=${next.toISOString()} launchDone=true (no boot fire)`,
+    );
+    return;
+  }
+
+  const introSent = getMeta(META_LAUNCH_INTRO_SENT) === "1";
+  if (!introSent) {
+    // True first go-live only
+    writeNextAt(new Date(Date.now() + 30_000));
+    console.log(
+      `Wheel scheduler: launch pending (fresh); first fire ~30s → ${new Date(readNextAt()!).toISOString()}`,
+    );
+    return;
+  }
+
+  // Intro already posted: resume at stored spin time only (never re-arm +30s)
+  const spinAt = Number(getMeta(META_LAUNCH_SPIN_AT) || "");
+  if (Number.isFinite(spinAt) && spinAt > Date.now() + 5_000) {
+    writeNextAt(new Date(spinAt));
+  } else if (Number.isFinite(spinAt) && spinAt > 0) {
+    // Spin time passed but launch not marked done - tick may recover via spin row
+    writeNextAt(new Date(Date.now() + 5_000));
+  } else {
+    writeNextAt(new Date(Date.now() + 30_000));
+  }
+  console.log(
+    `Wheel scheduler: launch resume at ${new Date(readNextAt()!).toISOString()} (intro already sent)`,
+  );
+}
+
+/**
  * Arms the daily clock (WHEEL_ENABLED + WHEEL_DAILY).
- * If launch day is still pending, first fire is ~30s after boot (intro + 5–15 min spin).
- * After that, draws are random in 17:00–21:00 Europe/Berlin.
+ * Boot never posts; it only waits for the stored next time.
  */
 export function startWheelScheduler(bot: Bot, provider: RpcProvider): void {
   if (!config.wheelEnabled || !config.wheelDaily) {
@@ -282,33 +357,28 @@ export function startWheelScheduler(bot: Bot, provider: RpcProvider): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
-  if (!isWheelLaunchDone()) {
-    // Go-live: don't wait until tomorrow's 17–21 window for day one.
-    writeNextAt(new Date(Date.now() + 30_000));
-  } else if (!readNextAt() || (readNextAt() ?? 0) < Date.now()) {
-    writeNextAt(pickNextDailyDrawAfter(new Date()));
-  }
-
-  const nextAt = readNextAt()!;
-  console.log(
-    `Wheel scheduler: armed next=${new Date(nextAt).toISOString()} launchDone=${isWheelLaunchDone()}`,
-  );
+  armSchedulerClock();
 
   const tick = async () => {
     try {
       const due = readNextAt();
       if (due == null || Date.now() < due) return;
-      // Reserve next slot before running so restarts don't double-fire.
-      const following = pickNextDailyDrawAfter(new Date(due + 60_000));
-      writeNextAt(following);
 
       if (!isWheelLaunchDone()) {
+        // Do not advance the daily clock until launch finishes.
         console.log("Wheel scheduler: running launch sequence");
         await runWheelLaunchSequence(bot, provider);
-      } else {
-        console.log("Wheel scheduler: running daily draw");
-        await runScheduledDaily(bot, provider);
+        return;
       }
+
+      // Reserve the following slot BEFORE running so a crash/redeploy mid-spin
+      // cannot replay this same due time.
+      const following = pickNextDailyDrawAfter(new Date(Math.max(due, Date.now()) + 60_000));
+      writeNextAt(following);
+      console.log(
+        `Wheel scheduler: running daily draw; reserved next=${following.toISOString()}`,
+      );
+      await runScheduledDaily(bot, provider);
     } catch (error) {
       console.warn("Wheel scheduler tick failed:", error);
     }

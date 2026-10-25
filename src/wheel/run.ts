@@ -259,7 +259,15 @@ export async function runWheelSpin(
       try {
         await bot.api.pinChatMessage(chatId, messageId, { disable_notification: true });
       } catch (error) {
-        console.warn(`Wheel pin failed for ${chatId}:`, error);
+        const desc =
+          error && typeof error === "object" && "description" in error
+            ? String((error as { description?: string }).description ?? "")
+            : "";
+        if (/not enough rights|PIN_MESSAGE|CHAT_ADMIN_REQUIRED/i.test(desc)) {
+          console.log(`Wheel: skip pin in ${chatId} (no pin rights)`);
+        } else {
+          console.warn(`Wheel: pin skipped for ${chatId}: ${desc || String(error)}`);
+        }
       }
     }
 

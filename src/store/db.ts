@@ -604,6 +604,14 @@ export function claimWheelPayout(id: number): WheelSpinRow | null {
   return getWheelSpin(id) ?? null;
 }
 
+/** Most recent spin row (any chat) - used to detect completed launch after a crash/redeploy. */
+export function getLatestWheelSpin(): WheelSpinRow | undefined {
+  const row = openDb()
+    .prepare(`SELECT * FROM wheel_spins ORDER BY id DESC LIMIT 1`)
+    .get() as WheelSpinDb | undefined;
+  return row ? mapWheelSpin(row) : undefined;
+}
+
 /** Latest spin in a chat that still needs a live payout (failed / stuck paying / dry_run with winner). */
 export function getLatestRetryableWheelSpin(chatId: number): WheelSpinRow | undefined {
   const row = openDb()
