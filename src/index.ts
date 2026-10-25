@@ -6,6 +6,7 @@ import { registerChartCommand } from "./bot/chart-cmd.ts";
 import { registerEliCommand } from "./bot/eli-cmd.ts";
 import { registerShillCommand } from "./bot/shill-cmd.ts";
 import { registerWheelCommand } from "./bot/wheel-cmd.ts";
+import { startWheelScheduler } from "./wheel/schedule.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
 import { attachNftDispatcher } from "./bot/nft-dispatch.ts";
 import { attachBurnDispatcher } from "./bot/burn-dispatch.ts";
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
   await listener.start();
   await startNftActivityPoller(onNftAlert);
   await startBurnDigestPoller(provider, onBurnDigest);
+  startWheelScheduler(bot, provider);
   await bot.start({
     onStart: (info) => {
       console.log(`${BOT_NAME} @${info.username} is online`);

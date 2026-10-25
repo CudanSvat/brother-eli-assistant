@@ -1,4 +1,4 @@
-import { WHEEL_PRIZE_WEIGHTS } from "../config.ts";
+import { WHEEL_PRIZE_WEIGHTS, type WheelPrizeTier } from "../config.ts";
 import type { EliHolderRow } from "../store/db.ts";
 
 export interface WheelOutcome {
@@ -12,34 +12,59 @@ export interface WheelOutcome {
   winnerLabel: string;
 }
 
-function prizeLabels(): string[] {
-  return WHEEL_PRIZE_WEIGHTS.map((t) => `${t.prizeSlay} SLAY`);
+export interface RollWheelOptions {
+  /** Launch-day: always pick a winner. */
+  forceWin?: boolean;
+  /** Launch-day: drop the smallest prize tier (reweight the rest). */
+  dropSmallestPrize?: boolean;
 }
 
-function pickWeightedPrize(): number {
-  const total = WHEEL_PRIZE_WEIGHTS.reduce((sum, t) => sum + t.weight, 0);
+/** On-chain collection display name. */
+export function eliNftLabel(tokenId: number | string): string {
+  return `Brother Eli Bald Kings #${tokenId}`;
+}
+
+function activeTiers(opts?: RollWheelOptions): WheelPrizeTier {
+  let tiers = [...WHEEL_PRIZE_WEIGHTS];
+  if (opts?.dropSmallestPrize && tiers.length > 1) {
+    const min = Math.min(...tiers.map((t) => t.prizeSlay));
+    tiers = tiers.filter((t) => t.prizeSlay !== min);
+  }
+  return tiers;
+}
+
+function prizeLabels(tiers: WheelPrizeTier): string[] {
+  return tiers.map((t) => `${t.prizeSlay} SLAY`);
+}
+
+function pickWeightedPrize(tiers: WheelPrizeTier): number {
+  const total = tiers.reduce((sum, t) => sum + t.weight, 0);
   let roll = Math.random() * total;
-  for (const tier of WHEEL_PRIZE_WEIGHTS) {
+  for (const tier of tiers) {
     roll -= tier.weight;
     if (roll <= 0) return tier.prizeSlay;
   }
-  return WHEEL_PRIZE_WEIGHTS[WHEEL_PRIZE_WEIGHTS.length - 1]!.prizeSlay;
+  return tiers[tiers.length - 1]!.prizeSlay;
 }
 
 function sampleLabels(holders: EliHolderRow[], count: number): string[] {
-  if (!holders.length) return ["Eli #?", "Eli #?", "Eli #?"];
+  if (!holders.length) return [eliNftLabel("?"), eliNftLabel("?"), eliNftLabel("?")];
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     const h = holders[Math.floor(Math.random() * holders.length)]!;
-    out.push(`Eli #${h.tokenId}`);
+    out.push(eliNftLabel(h.tokenId));
   }
   return out;
 }
 
-/** 50/50 winner; if yes, uniform NFT + weighted prize. */
-export function rollWheelOutcome(holders: EliHolderRow[]): WheelOutcome {
-  const hasWinner = Math.random() < 0.5;
-  const prizes = prizeLabels();
+/** 50/50 winner (unless forceWin); if yes, uniform NFT + weighted prize. */
+export function rollWheelOutcome(
+  holders: EliHolderRow[],
+  opts?: RollWheelOptions,
+): WheelOutcome {
+  const tiers = activeTiers(opts);
+  const hasWinner = opts?.forceWin ? true : Math.random() < 0.5;
+  const prizes = prizeLabels(tiers);
   const reelLabels = sampleLabels(holders, Math.min(24, Math.max(8, holders.length)));
 
   if (!hasWinner || !holders.length) {
@@ -54,13 +79,13 @@ export function rollWheelOutcome(holders: EliHolderRow[]): WheelOutcome {
   }
 
   const pick = holders[Math.floor(Math.random() * holders.length)]!;
-  const prizeSlay = pickWeightedPrize();
+  const prizeSlay = pickWeightedPrize(tiers);
   return {
     hasWinner: true,
     tokenId: pick.tokenId,
     ownerAddress: pick.ownerAddress,
     prizeSlay,
     reelLabels: [...reelLabels, ...prizes],
-    winnerLabel: `Eli #${pick.tokenId}`,
+    winnerLabel: eliNftLabel(pick.tokenId),
   };
 }

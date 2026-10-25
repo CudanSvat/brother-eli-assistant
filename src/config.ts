@@ -57,9 +57,14 @@ export const config = {
   wheelLive: /^(1|true|yes|on)$/i.test(process.env.WHEEL_LIVE?.trim() || ""),
   /**
    * Use small test prizes (1/2/3/4) instead of production (8/88/888/8888).
-   * Production ladder stays in code — flip this off when going live for real.
+   * Production ladder stays in code - flip this off when going live for real.
    */
   wheelTestPrizes: /^(1|true|yes|on)$/i.test(process.env.WHEEL_TEST_PRIZES?.trim() || ""),
+  /**
+   * Arm daily scheduler (17:00-21:00 Europe/Berlin). Test bot only until production.
+   * First fire runs launch-day intro + forced win; later fires are normal draws.
+   */
+  wheelDaily: /^(1|true|yes|on)$/i.test(process.env.WHEEL_DAILY?.trim() || ""),
   /** Tip wallet (required only when WHEEL_LIVE). */
   slayTipAccountAddress: process.env.SLAY_TIP_ACCOUNT_ADDRESS?.trim() || "",
   slayTipPrivateKey: process.env.SLAY_TIP_PRIVATE_KEY?.trim() || "",

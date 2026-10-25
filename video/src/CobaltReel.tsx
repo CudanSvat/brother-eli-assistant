@@ -26,7 +26,9 @@ export const CobaltReel: React.FC<WheelProps> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const list = players.length ? players : ["Eli #1", "Eli #2", "Eli #3"];
+  const list = players.length
+    ? players
+    : ["Brother Eli Bald Kings #1", "Brother Eli Bald Kings #2", "Brother Eli Bald Kings #3"];
   const reelNames: string[] = [];
   const totalSlots = list.length * 7 + list.length;
   for (let rot = 0; rot < Math.ceil(totalSlots / list.length); rot++) {

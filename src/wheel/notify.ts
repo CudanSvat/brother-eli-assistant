@@ -28,9 +28,9 @@ export function wheelFailureOwnerHtml(opts: {
   tokenId: number | null;
 }): string {
   return [
-    "<b>Eli Selects — payout failed</b>",
+    "<b>Eli Selects - payout failed</b>",
     `Spin <code>#${opts.spinId}</code>`,
-    opts.tokenId != null ? `Eli #${opts.tokenId}` : null,
+    opts.tokenId != null ? `Brother Eli Bald Kings #${opts.tokenId}` : null,
     opts.prizeSlay != null ? `Prize: ${opts.prizeSlay} SLAY` : null,
     `Error: ${escapeHtml(opts.error)}`,
     "",

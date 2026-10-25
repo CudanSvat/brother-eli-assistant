@@ -12,12 +12,17 @@ type Attempt = {
 };
 
 function buildAttempts(players: string[], winner: string, hasWinner: boolean): Attempt[] {
-  const pool = (players.length ? players : ["Eli #12", "Eli #88", "Eli #233"]).filter(
+  const pool = (players.length
+    ? players
+    : ["Brother Eli Bald Kings #12", "Brother Eli Bald Kings #88", "Brother Eli Bald Kings #233"]
+  ).filter(
     (p) => p !== winner,
   );
   const picks: string[] = [];
   for (let i = 0; i < 6; i++) {
-    picks.push(pool[i % Math.max(1, pool.length)] ?? `Eli #${(i + 1) * 37}`);
+    picks.push(
+      pool[i % Math.max(1, pool.length)] ?? `Brother Eli Bald Kings #${(i + 1) * 37}`,
+    );
   }
   const layout: Attempt[] = [
     { label: picks[0]!, kind: "reject", x: 120, y: 310, rot: -8 },

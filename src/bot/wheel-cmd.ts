@@ -10,6 +10,10 @@ import { escapeHtml } from "../lib/format.ts";
 import { getTipWalletStatus } from "../wheel/payout.ts";
 import { retryLatestWheelPayout } from "../wheel/retry.ts";
 import { runWheelSpin } from "../wheel/run.ts";
+import {
+  isWheelLaunchDone,
+  runWheelLaunchSequence,
+} from "../wheel/schedule.ts";
 import { parseWheelVariant } from "../wheel/variants.ts";
 
 let busy = false;
@@ -44,11 +48,11 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
     return;
   }
   if (!config.botOwnerIds.length) {
-    console.warn("Wheel: BOT_OWNER_IDS empty — owner commands/DMs will not work");
+    console.warn("Wheel: BOT_OWNER_IDS empty - owner commands/DMs will not work");
   }
 
   console.log(
-    `Wheel: enabled chat=${config.wheelTestChatId} live=${config.wheelLive ? "yes" : "dry-run"} ${prizeModeLabel()} tip=${config.slayTipAccountAddress ? "configured" : "missing"} (owner-only, not in public help)`,
+    `Wheel: enabled chat=${config.wheelTestChatId} live=${config.wheelLive ? "yes" : "dry-run"} daily=${config.wheelDaily ? "on" : "off"} launchDone=${isWheelLaunchDone()} ${prizeModeLabel()} tip=${config.slayTipAccountAddress ? "configured" : "missing"} (owner-only, not in public help)`,
   );
 
   bot.command("wheel_wallet", async (ctx) => {
@@ -58,14 +62,16 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
 
     const status = await getTipWalletStatus(provider);
     const lines = [
-      "<b>Eli Selects — tip wallet</b>",
+      "<b>Eli Selects - tip wallet</b>",
       "",
       `Mode: <b>${config.wheelLive ? "LIVE" : "dry-run"}</b>`,
+      `Daily: <b>${config.wheelDaily ? "armed" : "off"}</b>`,
+      `Launch day: <b>${isWheelLaunchDone() ? "done" : "pending"}</b>`,
       `Prizes: <code>${escapeHtml(prizeModeLabel())}</code>`,
-      `Address: ${status.address ? `<code>${escapeHtml(status.address)}</code>` : "—"}`,
+      `Address: ${status.address ? `<code>${escapeHtml(status.address)}</code>` : "-"}`,
       `Configured: <b>${status.configured ? "yes" : "no"}</b>`,
-      `SLAY: <b>${status.slayBalance != null ? status.slayBalance.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "—"}</b>`,
-      `STRK (gas): <b>${status.strkBalance != null ? status.strkBalance.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "—"}</b>`,
+      `SLAY: <b>${status.slayBalance != null ? status.slayBalance.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "-"}</b>`,
+      `STRK (gas): <b>${status.strkBalance != null ? status.strkBalance.toLocaleString("en-US", { maximumFractionDigits: 4 }) : "-"}</b>`,
     ];
     if (status.error) lines.push("", `⚠️ ${escapeHtml(status.error)}`);
     if (!config.wheelLive) {
@@ -79,7 +85,7 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
     const chatId = targetChatId(ctx);
     if (chatId == null) return;
     if (busy) {
-      await ctx.reply("Busy — try again in a moment.");
+      await ctx.reply("Busy - try again in a moment.");
       return;
     }
     busy = true;
@@ -99,7 +105,7 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
     const chatId = targetChatId(ctx);
     if (chatId == null) return;
     if (busy) {
-      await ctx.reply("Busy — a spin is already running.");
+      await ctx.reply("Busy - a spin is already running.");
       return;
     }
 
@@ -120,12 +126,44 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
           // need delete-message rights; ignore
         }
       }
-      const result = await runWheelSpin(bot, provider, chatId, parsed);
+      const result = await runWheelSpin(bot, provider, {
+        chatIds: [chatId],
+        variantKey: parsed,
+        showStatus: true,
+      });
       if (ctx.chat?.type === "private") {
         await ctx.reply(
           result.ok ? `Done (spin #${result.spinId}).` : `Failed: ${result.error}`,
         );
       }
+    } finally {
+      busy = false;
+    }
+  });
+
+  /** Owner: run launch-day intro + delayed first (forced) spin now. */
+  bot.command("wheel_launch", async (ctx) => {
+    if (!requireOwner(ctx)) return;
+    if (ctx.chat?.type !== "private" && ctx.chat?.id !== config.wheelTestChatId) return;
+    if (isWheelLaunchDone()) {
+      await ctx.reply("Launch day already marked done. Use /wheel_test for a normal spin.");
+      return;
+    }
+    if (busy) {
+      await ctx.reply("Busy - try again in a moment.");
+      return;
+    }
+    busy = true;
+    try {
+      await ctx.reply(
+        "Launch sequence started: intro now, first draw in 5-15 minutes (must win, no smallest prize).",
+      );
+      const result = await runWheelLaunchSequence(bot, provider);
+      await ctx.reply(
+        result.ok
+          ? `Launch spin done (#${result.spinId}). Daily clock continues if WHEEL_DAILY=1.`
+          : `Launch failed: ${result.error}`,
+      );
     } finally {
       busy = false;
     }

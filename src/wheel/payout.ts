@@ -249,13 +249,13 @@ export async function settleWheelPayout(
 export function payoutCaptionNote(result: SettleResult): string {
   switch (result.kind) {
     case "paid":
-      return `Paid <b>${result.spin.prizeSlay} SLAY</b> · <a href="${result.voyagerUrl}">Voyager</a>`;
+      return `SENT <b>${result.spin.prizeSlay} SLAY</b> · <a href="${result.voyagerUrl}">Voyager</a>`;
     case "already_paid":
-      return `Already paid <b>${result.spin.prizeSlay} SLAY</b> · <a href="${result.voyagerUrl}">Voyager</a>`;
+      return `Already sent <b>${result.spin.prizeSlay} SLAY</b> · <a href="${result.voyagerUrl}">Voyager</a>`;
     case "dry_run":
       return `<i>Dry-run:</i> would send <b>${result.spin.prizeSlay} SLAY</b> to <code>${escapeHtml(result.spin.ownerAddress ?? "")}</code>.`;
     case "failed":
-      return `Payout delayed — the team was notified.`;
+      return `Payout delayed - the team was notified.`;
     case "skipped":
       return escapeHtml(result.reason);
     case "busy":
