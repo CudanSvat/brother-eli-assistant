@@ -256,26 +256,10 @@ export async function runWheelSpin(
         }
       }
 
-      try {
-        await bot.api.pinChatMessage(chatId, messageId, { disable_notification: true });
-      } catch (error) {
-        const desc =
-          error && typeof error === "object" && "description" in error
-            ? String((error as { description?: string }).description ?? "")
-            : "";
-        if (/not enough rights|PIN_MESSAGE|CHAT_ADMIN_REQUIRED/i.test(desc)) {
-          console.log(`Wheel: skip pin in ${chatId} (no pin rights)`);
-        } else {
-          console.warn(`Wheel: pin skipped for ${chatId}: ${desc || String(error)}`);
-        }
-      }
     }
 
     if (spin.status === "posted") {
-      spin = updateWheelSpin(spin.id, { status: "edited" }) ?? spin;
-    }
-    if (spin.status === "edited" || spin.status === "posted") {
-      updateWheelSpin(spin.id, { status: "pinned" });
+      updateWheelSpin(spin.id, { status: "edited" });
     }
 
     return { ok: true, spinId: spin.id };
