@@ -1,4 +1,4 @@
-import type { Bot } from "grammy";
+import type { Bot, Context } from "grammy";
 import type { RpcProvider } from "starknet";
 import {
   WHEEL_PRIZE_WEIGHTS,
@@ -10,7 +10,7 @@ import { escapeHtml } from "../lib/format.ts";
 import { getTipWalletStatus } from "../wheel/payout.ts";
 import { retryLatestWheelPayout } from "../wheel/retry.ts";
 import { runWheelSpin } from "../wheel/run.ts";
-import { parseWheelVariant, variantHelp } from "../wheel/variants.ts";
+import { parseWheelVariant } from "../wheel/variants.ts";
 
 let busy = false;
 
@@ -19,6 +19,19 @@ function prizeModeLabel(): string {
   const prod = WHEEL_PRIZE_WEIGHTS_PRODUCTION.map((t) => t.prizeSlay).join("/");
   if (config.wheelTestPrizes) return `test prizes ${active} (prod ${prod} remembered)`;
   return `production prizes ${active}`;
+}
+
+/** Owner-only gate: silent for everyone else (no command leakage). */
+function requireOwner(ctx: Context): boolean {
+  return Boolean(ctx.from && isBotOwner(ctx.from.id));
+}
+
+function targetChatId(ctx: Context): number | null {
+  if (!ctx.chat) return null;
+  // Owner DM → post/spin in the configured test group
+  if (ctx.chat.type === "private") return config.wheelTestChatId;
+  if (ctx.chat.id === config.wheelTestChatId) return ctx.chat.id;
+  return null;
 }
 
 export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
@@ -30,21 +43,18 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
     console.warn("Wheel: WHEEL_ENABLED but WHEEL_TEST_CHAT_ID is missing");
     return;
   }
+  if (!config.botOwnerIds.length) {
+    console.warn("Wheel: BOT_OWNER_IDS empty — owner commands/DMs will not work");
+  }
 
   console.log(
-    `Wheel: enabled chat=${config.wheelTestChatId} live=${config.wheelLive ? "yes" : "dry-run"} ${prizeModeLabel()} tip=${config.slayTipAccountAddress ? "configured" : "missing"}`,
+    `Wheel: enabled chat=${config.wheelTestChatId} live=${config.wheelLive ? "yes" : "dry-run"} ${prizeModeLabel()} tip=${config.slayTipAccountAddress ? "configured" : "missing"} (owner-only, not in public help)`,
   );
 
   bot.command("wheel_wallet", async (ctx) => {
-    if (!ctx.chat || !ctx.from) return;
-    if (!isBotOwner(ctx.from.id)) {
-      await ctx.reply("Owner only.");
-      return;
-    }
-    if (ctx.chat.id !== config.wheelTestChatId && ctx.chat.type !== "private") {
-      await ctx.reply("Use /wheel_wallet in the test group or in a DM.");
-      return;
-    }
+    if (!requireOwner(ctx)) return; // silent
+    // Prefer DM; allow in test group for owner only
+    if (ctx.chat?.type !== "private" && ctx.chat?.id !== config.wheelTestChatId) return;
 
     const status = await getTipWalletStatus(provider);
     const lines = [
@@ -65,22 +75,16 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
   });
 
   bot.command("wheel_retry", async (ctx) => {
-    if (!ctx.chat || !ctx.from) return;
-    if (!isBotOwner(ctx.from.id)) {
-      await ctx.reply("Owner only.");
-      return;
-    }
-    if (ctx.chat.id !== config.wheelTestChatId) {
-      await ctx.reply("Retry only in the configured test group.");
-      return;
-    }
+    if (!requireOwner(ctx)) return;
+    const chatId = targetChatId(ctx);
+    if (chatId == null) return;
     if (busy) {
-      await ctx.reply("A wheel spin is already running.");
+      await ctx.reply("Busy — try again in a moment.");
       return;
     }
     busy = true;
     try {
-      const result = await retryLatestWheelPayout(bot, provider, ctx.chat.id);
+      const result = await retryLatestWheelPayout(bot, provider, chatId);
       await ctx.reply(result.text, {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -91,31 +95,37 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
   });
 
   bot.command("wheel_test", async (ctx) => {
-    if (!ctx.chat || !ctx.from) return;
-    if (!isBotOwner(ctx.from.id)) {
-      await ctx.reply("Owner only.");
-      return;
-    }
-    if (ctx.chat.id !== config.wheelTestChatId) {
-      await ctx.reply(
-        `Wheel test only works in the configured test group (chat ${config.wheelTestChatId}).`,
-      );
-      return;
-    }
+    if (!requireOwner(ctx)) return;
+    const chatId = targetChatId(ctx);
+    if (chatId == null) return;
     if (busy) {
-      await ctx.reply("A wheel spin is already running.");
+      await ctx.reply("Busy — a spin is already running.");
       return;
     }
 
-    const parsed = parseWheelVariant(ctx.match?.trim());
-    if (parsed == null) {
-      await ctx.reply(variantHelp());
-      return;
-    }
+    // Default reel; optional arg only for owner (no public usage hint)
+    const parsed = parseWheelVariant(ctx.match?.trim()) ?? "reel";
 
     busy = true;
     try {
-      await runWheelSpin(bot, provider, ctx.chat.id, parsed);
+      // Prefer triggering from DM so the group never sees /wheel_test
+      if (ctx.chat?.type === "private") {
+        await ctx.reply(`Starting Eli Selects in test group <code>${chatId}</code>…`, {
+          parse_mode: "HTML",
+        });
+      } else if (ctx.message) {
+        try {
+          await ctx.deleteMessage();
+        } catch {
+          // need delete-message rights; ignore
+        }
+      }
+      const result = await runWheelSpin(bot, provider, chatId, parsed);
+      if (ctx.chat?.type === "private") {
+        await ctx.reply(
+          result.ok ? `Done (spin #${result.spinId}).` : `Failed: ${result.error}`,
+        );
+      }
     } finally {
       busy = false;
     }

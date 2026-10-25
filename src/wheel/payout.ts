@@ -255,7 +255,7 @@ export function payoutCaptionNote(result: SettleResult): string {
     case "dry_run":
       return `<i>Dry-run:</i> would send <b>${result.spin.prizeSlay} SLAY</b> to <code>${escapeHtml(result.spin.ownerAddress ?? "")}</code>.`;
     case "failed":
-      return `Payout failed: ${escapeHtml(result.error)}\n<i>Fix gas/bug, then /wheel_retry</i>`;
+      return `Payout delayed — the team was notified.`;
     case "skipped":
       return escapeHtml(result.reason);
     case "busy":

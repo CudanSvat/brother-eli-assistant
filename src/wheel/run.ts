@@ -12,6 +12,7 @@ import {
 } from "../store/db.ts";
 import { getCachedEliHolders, refreshEliHolders } from "./holders.ts";
 import { rollWheelOutcome } from "./outcome.ts";
+import { notifyWheelOwners, wheelFailureOwnerHtml } from "./notify.ts";
 import { payoutCaptionNote, settleWheelPayout } from "./payout.ts";
 import { renderWheelVideo } from "./render.ts";
 import { resolveCompositionId, type WheelVariantKey } from "./variants.ts";
@@ -157,6 +158,17 @@ export async function runWheelSpin(
       const settled = await settleWheelPayout(provider, spin.id);
       payoutNote = payoutCaptionNote(settled);
       if ("spin" in settled) spin = settled.spin;
+      if (settled.kind === "failed") {
+        await notifyWheelOwners(
+          bot,
+          wheelFailureOwnerHtml({
+            spinId: spin.id,
+            error: settled.error,
+            prizeSlay: spin.prizeSlay,
+            tokenId: spin.tokenId,
+          }),
+        );
+      }
     }
 
     const caption = resultCaption(spin, payoutNote);
