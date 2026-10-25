@@ -55,6 +55,11 @@ export const config = {
   })(),
   /** When false, post dry-run text instead of transferring SLAY. */
   wheelLive: /^(1|true|yes|on)$/i.test(process.env.WHEEL_LIVE?.trim() || ""),
+  /**
+   * Use small test prizes (1/2/3/4) instead of production (8/88/888/8888).
+   * Production ladder stays in code — flip this off when going live for real.
+   */
+  wheelTestPrizes: /^(1|true|yes|on)$/i.test(process.env.WHEEL_TEST_PRIZES?.trim() || ""),
   /** Tip wallet (required only when WHEEL_LIVE). */
   slayTipAccountAddress: process.env.SLAY_TIP_ACCOUNT_ADDRESS?.trim() || "",
   slayTipPrivateKey: process.env.SLAY_TIP_PRIVATE_KEY?.trim() || "",
@@ -65,29 +70,48 @@ export const ELI_COLLECTION =
   process.env.ELI_COLLECTION?.trim() ||
   "0x062969ccea9a6740d66f2c9aab3f1466f75c5fe21f28355082e20ace7340a289";
 
+export type WheelPrizeTier = { prizeSlay: number; weight: number }[];
+
+/** Production ladder — keep forever; used when WHEEL_TEST_PRIZES is off. */
+export const WHEEL_PRIZE_WEIGHTS_PRODUCTION: WheelPrizeTier = [
+  { prizeSlay: 8, weight: 53 },
+  { prizeSlay: 88, weight: 30 },
+  { prizeSlay: 888, weight: 15 },
+  { prizeSlay: 8888, weight: 2 },
+];
+
+/** Cheap ladder for tip-wallet testing (same odds shape). */
+export const WHEEL_PRIZE_WEIGHTS_TEST: WheelPrizeTier = [
+  { prizeSlay: 1, weight: 53 },
+  { prizeSlay: 2, weight: 30 },
+  { prizeSlay: 3, weight: 15 },
+  { prizeSlay: 4, weight: 2 },
+];
+
+function parsePrizeWeights(raw: string): WheelPrizeTier | null {
+  const parsed: WheelPrizeTier = [];
+  for (const part of raw.split(/[,;]+/)) {
+    const [p, w] = part.split(":").map((s) => Number(s.trim()));
+    if (Number.isFinite(p) && p > 0 && Number.isFinite(w) && w > 0) {
+      parsed.push({ prizeSlay: p, weight: w });
+    }
+  }
+  return parsed.length ? parsed : null;
+}
+
 /**
- * Weighted prize tiers when a spin has a winner (SLAY → relative weight).
- * Default among wins (sums to 100): 8→53%, 88→30%, 888→15%, 8888→2%.
- * Override: WHEEL_PRIZE_WEIGHTS=8:53,88:30,888:15,8888:2
+ * Active prize tiers. Priority:
+ * 1) WHEEL_PRIZE_WEIGHTS env override
+ * 2) WHEEL_TEST_PRIZES=1 → test ladder (1/2/3/4)
+ * 3) production ladder (8/88/888/8888)
  */
-export const WHEEL_PRIZE_WEIGHTS: { prizeSlay: number; weight: number }[] = (() => {
+export const WHEEL_PRIZE_WEIGHTS: WheelPrizeTier = (() => {
   const raw = process.env.WHEEL_PRIZE_WEIGHTS?.trim();
   if (raw) {
-    const parsed: { prizeSlay: number; weight: number }[] = [];
-    for (const part of raw.split(/[,;]+/)) {
-      const [p, w] = part.split(":").map((s) => Number(s.trim()));
-      if (Number.isFinite(p) && p > 0 && Number.isFinite(w) && w > 0) {
-        parsed.push({ prizeSlay: p, weight: w });
-      }
-    }
-    if (parsed.length) return parsed;
+    const parsed = parsePrizeWeights(raw);
+    if (parsed) return parsed;
   }
-  return [
-    { prizeSlay: 8, weight: 53 },
-    { prizeSlay: 88, weight: 30 },
-    { prizeSlay: 888, weight: 15 },
-    { prizeSlay: 8888, weight: 2 },
-  ];
+  return config.wheelTestPrizes ? WHEEL_PRIZE_WEIGHTS_TEST : WHEEL_PRIZE_WEIGHTS_PRODUCTION;
 })();
 
 export function isBotOwner(userId: number | undefined | null): boolean {
