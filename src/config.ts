@@ -45,7 +45,49 @@ export const config = {
     .split(/[\s,;]+/)
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isSafeInteger(n) && n > 0),
+
+  /** Daily / test wheel of fortune (Brother Eli NFT prize). */
+  wheelEnabled: /^(1|true|yes|on)$/i.test(process.env.WHEEL_ENABLED?.trim() || ""),
+  /** Only this chat may receive spins while testing. */
+  wheelTestChatId: (() => {
+    const n = Number(process.env.WHEEL_TEST_CHAT_ID?.trim() || "");
+    return Number.isSafeInteger(n) && n !== 0 ? n : null;
+  })(),
+  /** When false, post dry-run text instead of transferring SLAY. */
+  wheelLive: /^(1|true|yes|on)$/i.test(process.env.WHEEL_LIVE?.trim() || ""),
+  /** Tip wallet (required only when WHEEL_LIVE). */
+  slayTipAccountAddress: process.env.SLAY_TIP_ACCOUNT_ADDRESS?.trim() || "",
+  slayTipPrivateKey: process.env.SLAY_TIP_PRIVATE_KEY?.trim() || "",
 };
+
+/** Brother Eli NFT collection (mainnet). */
+export const ELI_COLLECTION =
+  process.env.ELI_COLLECTION?.trim() ||
+  "0x062969ccea9a6740d66f2c9aab3f1466f75c5fe21f28355082e20ace7340a289";
+
+/**
+ * Weighted prize tiers when a spin has a winner (SLAY units → relative weight).
+ * 4 SLAY is rare. Override via WHEEL_PRIZE_WEIGHTS=1:50,2:30,3:15,4:5
+ */
+export const WHEEL_PRIZE_WEIGHTS: { prizeSlay: number; weight: number }[] = (() => {
+  const raw = process.env.WHEEL_PRIZE_WEIGHTS?.trim();
+  if (raw) {
+    const parsed: { prizeSlay: number; weight: number }[] = [];
+    for (const part of raw.split(/[,;]+/)) {
+      const [p, w] = part.split(":").map((s) => Number(s.trim()));
+      if (Number.isFinite(p) && p > 0 && Number.isFinite(w) && w > 0) {
+        parsed.push({ prizeSlay: p, weight: w });
+      }
+    }
+    if (parsed.length) return parsed;
+  }
+  return [
+    { prizeSlay: 1, weight: 50 },
+    { prizeSlay: 2, weight: 30 },
+    { prizeSlay: 3, weight: 15 },
+    { prizeSlay: 4, weight: 5 },
+  ];
+})();
 
 export function isBotOwner(userId: number | undefined | null): boolean {
   return userId != null && config.botOwnerIds.includes(userId);

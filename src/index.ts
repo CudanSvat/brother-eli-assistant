@@ -5,6 +5,7 @@ import { registerAdmin } from "./bot/admin.ts";
 import { registerChartCommand } from "./bot/chart-cmd.ts";
 import { registerEliCommand } from "./bot/eli-cmd.ts";
 import { registerShillCommand } from "./bot/shill-cmd.ts";
+import { registerWheelCommand } from "./bot/wheel-cmd.ts";
 import { attachDispatcher } from "./bot/dispatch.ts";
 import { attachNftDispatcher } from "./bot/nft-dispatch.ts";
 import { attachBurnDispatcher } from "./bot/burn-dispatch.ts";
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
   registerChartCommand(bot);
   registerEliCommand(bot);
   registerShillCommand(bot, provider);
+  registerWheelCommand(bot, provider);
   const onSwap = attachDispatcher(bot);
   const onNftAlert = attachNftDispatcher(bot);
   const onBurnDigest = attachBurnDispatcher(bot);

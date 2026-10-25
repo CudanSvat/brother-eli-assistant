@@ -115,6 +115,27 @@ export function openDb(): Database.Database {
       post_key TEXT PRIMARY KEY,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS eli_holders (
+      token_id INTEGER PRIMARY KEY,
+      owner_address TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS wheel_spins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      triggered_at INTEGER NOT NULL,
+      has_winner INTEGER NOT NULL,
+      token_id INTEGER,
+      owner_address TEXT,
+      prize_slay REAL,
+      video_path TEXT,
+      chat_id INTEGER,
+      message_id INTEGER,
+      status TEXT NOT NULL,
+      tx_hash TEXT,
+      error TEXT
+    );
   `);
   const cols = db.pragma("table_info(tokens)") as { name: string }[];
   if (!cols.some((col) => col.name === "whale_usd")) {
@@ -397,4 +418,165 @@ export function markPosted(postKey: string): void {
     )
     .run({ postKey, createdAt: Date.now() });
   sqlite.prepare("DELETE FROM posted_alerts WHERE created_at < ?").run(Date.now() - 48 * 3_600_000);
+}
+
+export interface EliHolderRow {
+  tokenId: number;
+  ownerAddress: string;
+}
+
+export function replaceEliHolders(rows: EliHolderRow[]): void {
+  const sqlite = openDb();
+  const now = Date.now();
+  const tx = sqlite.transaction(() => {
+    sqlite.prepare("DELETE FROM eli_holders").run();
+    const insert = sqlite.prepare(
+      `INSERT INTO eli_holders (token_id, owner_address, updated_at)
+       VALUES (@tokenId, @ownerAddress, @updatedAt)`,
+    );
+    for (const row of rows) {
+      insert.run({
+        tokenId: row.tokenId,
+        ownerAddress: normalizeAddress(row.ownerAddress),
+        updatedAt: now,
+      });
+    }
+  });
+  tx();
+}
+
+export function listEliHolders(): EliHolderRow[] {
+  const rows = openDb()
+    .prepare("SELECT token_id, owner_address FROM eli_holders ORDER BY token_id ASC")
+    .all() as { token_id: number; owner_address: string }[];
+  return rows.map((r) => ({ tokenId: r.token_id, ownerAddress: r.owner_address }));
+}
+
+export type WheelSpinStatus =
+  | "pending_render"
+  | "ready"
+  | "posted"
+  | "edited"
+  | "pinned"
+  | "dry_run"
+  | "paid"
+  | "failed";
+
+export interface WheelSpinRow {
+  id: number;
+  triggeredAt: number;
+  hasWinner: boolean;
+  tokenId: number | null;
+  ownerAddress: string | null;
+  prizeSlay: number | null;
+  videoPath: string | null;
+  chatId: number | null;
+  messageId: number | null;
+  status: WheelSpinStatus;
+  txHash: string | null;
+  error: string | null;
+}
+
+interface WheelSpinDb {
+  id: number;
+  triggered_at: number;
+  has_winner: number;
+  token_id: number | null;
+  owner_address: string | null;
+  prize_slay: number | null;
+  video_path: string | null;
+  chat_id: number | null;
+  message_id: number | null;
+  status: string;
+  tx_hash: string | null;
+  error: string | null;
+}
+
+function mapWheelSpin(row: WheelSpinDb): WheelSpinRow {
+  return {
+    id: row.id,
+    triggeredAt: row.triggered_at,
+    hasWinner: Boolean(row.has_winner),
+    tokenId: row.token_id,
+    ownerAddress: row.owner_address,
+    prizeSlay: row.prize_slay,
+    videoPath: row.video_path,
+    chatId: row.chat_id,
+    messageId: row.message_id,
+    status: row.status as WheelSpinStatus,
+    txHash: row.tx_hash,
+    error: row.error,
+  };
+}
+
+export function insertWheelSpin(input: {
+  hasWinner: boolean;
+  tokenId: number | null;
+  ownerAddress: string | null;
+  prizeSlay: number | null;
+  status: WheelSpinStatus;
+}): WheelSpinRow {
+  const result = openDb()
+    .prepare(
+      `INSERT INTO wheel_spins (
+         triggered_at, has_winner, token_id, owner_address, prize_slay, status
+       ) VALUES (
+         @triggeredAt, @hasWinner, @tokenId, @ownerAddress, @prizeSlay, @status
+       )`,
+    )
+    .run({
+      triggeredAt: Date.now(),
+      hasWinner: input.hasWinner ? 1 : 0,
+      tokenId: input.tokenId,
+      ownerAddress: input.ownerAddress ? normalizeAddress(input.ownerAddress) : null,
+      prizeSlay: input.prizeSlay,
+      status: input.status,
+    });
+  const row = getWheelSpin(Number(result.lastInsertRowid));
+  if (!row) throw new Error("Failed to insert wheel spin");
+  return row;
+}
+
+export function getWheelSpin(id: number): WheelSpinRow | undefined {
+  const row = openDb().prepare("SELECT * FROM wheel_spins WHERE id = ?").get(id) as
+    | WheelSpinDb
+    | undefined;
+  return row ? mapWheelSpin(row) : undefined;
+}
+
+export function updateWheelSpin(
+  id: number,
+  patch: Partial<{
+    videoPath: string | null;
+    chatId: number | null;
+    messageId: number | null;
+    status: WheelSpinStatus;
+    txHash: string | null;
+    error: string | null;
+  }>,
+): WheelSpinRow | undefined {
+  const current = getWheelSpin(id);
+  if (!current) return undefined;
+  const next = { ...current, ...patch };
+  openDb()
+    .prepare(
+      `UPDATE wheel_spins SET
+         video_path = @videoPath,
+         chat_id = @chatId,
+         message_id = @messageId,
+         status = @status,
+         tx_hash = @txHash,
+         error = @error
+       WHERE id = @id`,
+    )
+    .run({
+      id,
+      videoPath: next.videoPath,
+      chatId: next.chatId,
+      messageId: next.messageId,
+      status: next.status,
+      txHash: next.txHash,
+      error: next.error,
+    });
+  return getWheelSpin(id);
 }

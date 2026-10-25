@@ -1,4 +1,5 @@
 node_modules/
+video/node_modules/
 dist/
 data/
 .env
@@ -6,3 +7,8 @@ data/
 .DS_Store
 .railway/
 chart-preview.png
+shill-preview.png
+*-preview.png
+chart-debug-*.png
+video/test-wheel.*
+video/node_modules/
