@@ -14,10 +14,7 @@ import { getCachedEliHolders, refreshEliHolders } from "./holders.ts";
 import { rollWheelOutcome } from "./outcome.ts";
 import { sendSlayPrize } from "./payout.ts";
 import { renderWheelVideo } from "./render.ts";
-import {
-  resolveCompositionId,
-  type WheelVariantKey,
-} from "./variants.ts";
+import { resolveCompositionId, type WheelVariantKey } from "./variants.ts";
 
 function pause(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -65,7 +62,7 @@ export async function runWheelSpin(
   bot: Bot,
   provider: RpcProvider,
   chatId: number,
-  variantKey: WheelVariantKey | "random" = "random",
+  variantKey: WheelVariantKey = "reel",
 ): Promise<{ ok: true; spinId: number } | { ok: false; error: string }> {
   const { variant, compositionId } = resolveCompositionId(variantKey);
   const statusMsg = await bot.api.sendMessage(

@@ -6,24 +6,21 @@ export const WHEEL_VARIANTS = {
 export type WheelVariantKey = keyof typeof WHEEL_VARIANTS;
 export type WheelCompositionId = (typeof WHEEL_VARIANTS)[WheelVariantKey];
 
-const KEYS = Object.keys(WHEEL_VARIANTS) as WheelVariantKey[];
-
-export function parseWheelVariant(raw: string | undefined): WheelVariantKey | "random" | null {
-  if (!raw) return "random";
+export function parseWheelVariant(raw: string | undefined): WheelVariantKey | null {
+  if (!raw) return "reel";
   const q = raw.trim().toLowerCase();
-  if (!q || q === "random") return "random";
-  if (q in WHEEL_VARIANTS) return q as WheelVariantKey;
+  if (!q || q === "random" || q === "reel") return "reel";
+  if (q === "stamp") return "stamp";
   return null;
 }
 
-export function resolveCompositionId(key: WheelVariantKey | "random"): {
+export function resolveCompositionId(key: WheelVariantKey): {
   variant: WheelVariantKey;
   compositionId: WheelCompositionId;
 } {
-  const variant = key === "random" ? KEYS[Math.floor(Math.random() * KEYS.length)]! : key;
-  return { variant, compositionId: WHEEL_VARIANTS[variant] };
+  return { variant: key, compositionId: WHEEL_VARIANTS[key] };
 }
 
 export function variantHelp(): string {
-  return "Usage: /wheel_test [reel|stamp|random]";
+  return "Usage: /wheel_test [reel|stamp] — default is reel";
 }

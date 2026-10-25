@@ -21,6 +21,7 @@ export const CobaltReel: React.FC<WheelProps> = ({
   winner,
   prizeLine,
   hasWinner,
+  winnerImageUrl,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -91,45 +92,93 @@ export const CobaltReel: React.FC<WheelProps> = ({
           <TitleBlock title={title} subtitle={subtitle} />
         </div>
 
-        {/* Polaroid Eli peek */}
-        <div
-          style={{
-            position: "absolute",
-            right: 48,
-            top: 200,
-            width: 200,
-            padding: 12,
-            paddingBottom: 36,
-            background: C.paperSunk,
-            border: `2px solid ${C.ink}`,
-            boxShadow: "5px 6px 0 rgba(17,18,15,0.35)",
-            transform: "rotate(4deg)",
-            zIndex: 3,
-          }}
-        >
-          <Img src={assets.eli} style={{ width: "100%", display: "block" }} />
-          <div
-            style={{
-              marginTop: 8,
-              textAlign: "center",
-              fontFamily: fonts.elite,
-              fontSize: 16,
-              color: C.ink,
-            }}
-          >
-            watching…
-          </div>
-          <Img
-            src={assets.tape}
-            style={{
-              position: "absolute",
-              top: -18,
-              left: 40,
-              width: 110,
-              transform: "rotate(-12deg)",
-            }}
-          />
-        </div>
+        {/* Polaroid: brand Eli → winning NFT art on reveal */}
+        {(() => {
+          const morphStart = revealStart;
+          const nftOp =
+            hasWinner && winnerImageUrl
+              ? interpolate(frame, [morphStart, morphStart + 18], [0, 1], {
+                  extrapolateLeft: "clamp",
+                  extrapolateRight: "clamp",
+                })
+              : 0;
+          const brandOp = 1 - nftOp;
+          const pop = spring({
+            frame: Math.max(0, frame - morphStart),
+            fps,
+            from: 1,
+            to: hasWinner && winnerImageUrl ? 1.08 : 1,
+            durationInFrames: 16,
+          });
+          const label =
+            hasWinner && nftOp > 0.5 ? winner : hasWinner && frame >= SPIN_END ? "…" : "watching…";
+          return (
+            <div
+              style={{
+                position: "absolute",
+                right: 48,
+                top: 200,
+                width: 200,
+                padding: 12,
+                paddingBottom: 36,
+                background: C.paperSunk,
+                border: `2px solid ${C.ink}`,
+                boxShadow: "5px 6px 0 rgba(17,18,15,0.35)",
+                transform: `rotate(4deg) scale(${pop})`,
+                zIndex: 3,
+              }}
+            >
+              <div style={{ position: "relative", width: "100%", aspectRatio: "1", overflow: "hidden" }}>
+                <Img
+                  src={assets.eli}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    opacity: brandOp,
+                  }}
+                />
+                {hasWinner && winnerImageUrl ? (
+                  <Img
+                    src={winnerImageUrl}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      opacity: nftOp,
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div
+                style={{
+                  marginTop: 8,
+                  textAlign: "center",
+                  fontFamily: fonts.elite,
+                  fontSize: 16,
+                  color: C.ink,
+                  textTransform: "uppercase",
+                }}
+              >
+                {label}
+              </div>
+              <Img
+                src={assets.tape}
+                style={{
+                  position: "absolute",
+                  top: -18,
+                  left: 40,
+                  width: 110,
+                  transform: "rotate(-12deg)",
+                }}
+              />
+            </div>
+          );
+        })()}
 
         <CobaltPanel
           style={{

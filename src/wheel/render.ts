@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { config } from "../config.ts";
 import type { WheelOutcome } from "./outcome.ts";
 import type { WheelCompositionId } from "./variants.ts";
 
@@ -17,9 +18,14 @@ export interface WheelVideoProps {
   winner: string;
   prizeLine: string;
   hasWinner: boolean;
+  winnerImageUrl: string | null;
 }
 
 function propsFromOutcome(outcome: WheelOutcome): WheelVideoProps {
+  const winnerImageUrl =
+    outcome.hasWinner && outcome.tokenId != null
+      ? `${config.eliSiteOrigin}/nft/images/${outcome.tokenId}.png`
+      : null;
   return {
     title: "Brother Eli Wheel",
     subtitle: "Daily $SLAY spin",
@@ -27,6 +33,7 @@ function propsFromOutcome(outcome: WheelOutcome): WheelVideoProps {
     winner: outcome.winnerLabel,
     prizeLine: outcome.hasWinner ? `${outcome.prizeSlay} SLAY` : "No prize today",
     hasWinner: outcome.hasWinner,
+    winnerImageUrl,
   };
 }
 

@@ -38,6 +38,8 @@ export interface WheelProps {
   winner: string;
   prizeLine: string;
   hasWinner: boolean;
+  /** Remote NFT art URL; polaroid morphs to this on a win. */
+  winnerImageUrl: string | null;
 }
 
 export const defaultWheelProps: WheelProps = {
@@ -47,4 +49,5 @@ export const defaultWheelProps: WheelProps = {
   winner: "Eli #233",
   prizeLine: "2 SLAY",
   hasWinner: true,
+  winnerImageUrl: "https://brothereli.com/nft/images/233.png",
 };
