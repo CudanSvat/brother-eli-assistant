@@ -36,7 +36,7 @@ const LAUNCH_DELAY_MAX_MS = 5 * 60_000;
 
 export const WHEEL_LAUNCH_INTRO = [
   "Brother Eli Selects starts today.",
-  "Every day between 17:00 and 21:00 (CET), Brother Eli will (with a 50% chance) pick one Bald King for a chance of 8/88/888/8888 SLAY - are you holding the lucky one?",
+  "Every day between 17:00 and 21:00 (CET), Brother Eli will (with a 50% chance) pick one Bald King for a chance of 8, 88, 888 or 8888 SLAY - are you holding the lucky one?",
   "Today's first select is in a few minutes. For the sake of good will, today the winner will be picked with 100% chance and 8 SLAY prize will be removed from the pot. Good luck.",
 ].join("\n");
 
