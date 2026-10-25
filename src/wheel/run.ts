@@ -12,7 +12,7 @@ import {
 } from "../store/db.ts";
 import { getCachedEliHolders, refreshEliHolders } from "./holders.ts";
 import { rollWheelOutcome } from "./outcome.ts";
-import { sendSlayPrize } from "./payout.ts";
+import { payoutCaptionNote, settleWheelPayout } from "./payout.ts";
 import { renderWheelVideo } from "./render.ts";
 import { resolveCompositionId, type WheelVariantKey } from "./variants.ts";
 
@@ -153,18 +153,10 @@ export async function runWheelSpin(
     let payoutNote: string;
     if (!spin.hasWinner || !spin.ownerAddress || spin.prizeSlay == null) {
       payoutNote = config.wheelLive ? "" : "<i>Dry-run mode — no transfer.</i>";
-    } else if (!config.wheelLive) {
-      payoutNote = `<i>Dry-run:</i> would send <b>${spin.prizeSlay} SLAY</b> to <code>${escapeHtml(spin.ownerAddress)}</code>.`;
-      spin = updateWheelSpin(spin.id, { status: "dry_run" }) ?? spin;
     } else {
-      const pay = await sendSlayPrize(provider, spin.ownerAddress, spin.prizeSlay);
-      if (pay.ok) {
-        payoutNote = `Paid <b>${spin.prizeSlay} SLAY</b> · <a href="https://starkscan.co/tx/${pay.txHash}">tx</a>`;
-        spin = updateWheelSpin(spin.id, { status: "paid", txHash: pay.txHash }) ?? spin;
-      } else {
-        payoutNote = `Payout failed: ${escapeHtml(pay.error)}`;
-        spin = updateWheelSpin(spin.id, { status: "failed", error: pay.error }) ?? spin;
-      }
+      const settled = await settleWheelPayout(provider, spin.id);
+      payoutNote = payoutCaptionNote(settled);
+      if ("spin" in settled) spin = settled.spin;
     }
 
     const caption = resultCaption(spin, payoutNote);

@@ -459,6 +459,7 @@ export type WheelSpinStatus =
   | "edited"
   | "pinned"
   | "dry_run"
+  | "paying"
   | "paid"
   | "failed";
 
@@ -579,4 +580,56 @@ export function updateWheelSpin(
       error: next.error,
     });
   return getWheelSpin(id);
+}
+
+/**
+ * Atomically claim a spin for payout. Only one caller wins.
+ * Allowed from failed / dry_run / posted / edited / pinned / paying (stuck).
+ * Never claims if already paid or tx_hash is set.
+ */
+export function claimWheelPayout(id: number): WheelSpinRow | null {
+  const result = openDb()
+    .prepare(
+      `UPDATE wheel_spins
+       SET status = 'paying', error = NULL
+       WHERE id = @id
+         AND has_winner = 1
+         AND tx_hash IS NULL
+         AND owner_address IS NOT NULL
+         AND prize_slay IS NOT NULL
+         AND status IN ('failed', 'dry_run', 'posted', 'edited', 'pinned', 'paying', 'ready')`,
+    )
+    .run({ id });
+  if (result.changes === 0) return null;
+  return getWheelSpin(id) ?? null;
+}
+
+/** Latest spin in a chat that still needs a live payout (failed / stuck paying / dry_run with winner). */
+export function getLatestRetryableWheelSpin(chatId: number): WheelSpinRow | undefined {
+  const row = openDb()
+    .prepare(
+      `SELECT * FROM wheel_spins
+       WHERE chat_id = ?
+         AND has_winner = 1
+         AND tx_hash IS NULL
+         AND owner_address IS NOT NULL
+         AND prize_slay IS NOT NULL
+         AND status IN ('failed', 'paying', 'dry_run')
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get(chatId) as WheelSpinDb | undefined;
+  return row ? mapWheelSpin(row) : undefined;
+}
+
+export function getLatestPaidWheelSpin(chatId: number): WheelSpinRow | undefined {
+  const row = openDb()
+    .prepare(
+      `SELECT * FROM wheel_spins
+       WHERE chat_id = ? AND status = 'paid' AND tx_hash IS NOT NULL
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get(chatId) as WheelSpinDb | undefined;
+  return row ? mapWheelSpin(row) : undefined;
 }

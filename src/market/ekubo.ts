@@ -83,3 +83,13 @@ export function starkscanTxUrl(hash: string): string {
 export function starkscanAddressUrl(address: string): string {
   return `https://starkscan.co/contract/${normalizeAddress(address)}`;
 }
+
+/** Voyager explorer (preferred for Eli Selects payouts). */
+export function voyagerTxUrl(hash: string): string {
+  const h = hash.startsWith("0x") ? hash : `0x${hash}`;
+  return `https://voyager.online/tx/${h}`;
+}
+
+export function voyagerAddressUrl(address: string): string {
+  return `https://voyager.online/contract/${normalizeAddress(address)}`;
+}

@@ -8,6 +8,7 @@ import {
 } from "../config.ts";
 import { escapeHtml } from "../lib/format.ts";
 import { getTipWalletStatus } from "../wheel/payout.ts";
+import { retryLatestWheelPayout } from "../wheel/retry.ts";
 import { runWheelSpin } from "../wheel/run.ts";
 import { parseWheelVariant, variantHelp } from "../wheel/variants.ts";
 
@@ -61,6 +62,32 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
       lines.push("", "<i>Set WHEEL_LIVE=1 on Railway to send real transfers.</i>");
     }
     await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+  });
+
+  bot.command("wheel_retry", async (ctx) => {
+    if (!ctx.chat || !ctx.from) return;
+    if (!isBotOwner(ctx.from.id)) {
+      await ctx.reply("Owner only.");
+      return;
+    }
+    if (ctx.chat.id !== config.wheelTestChatId) {
+      await ctx.reply("Retry only in the configured test group.");
+      return;
+    }
+    if (busy) {
+      await ctx.reply("A wheel spin is already running.");
+      return;
+    }
+    busy = true;
+    try {
+      const result = await retryLatestWheelPayout(bot, provider, ctx.chat.id);
+      await ctx.reply(result.text, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    } finally {
+      busy = false;
+    }
   });
 
   bot.command("wheel_test", async (ctx) => {
