@@ -1,6 +1,7 @@
 import type { Bot } from "grammy";
 import { GrammyError, InlineKeyboard } from "grammy";
-import { escapeHtml, formatUsd } from "../lib/format.ts";
+import { BURN_ADDRESS } from "../config.ts";
+import { escapeHtml, formatUsd, normalizeAddress } from "../lib/format.ts";
 import { formatBurnAmount, rawToUnits } from "../market/burn.ts";
 import { getLaunchpadTokenByAddress, launchpadTokenUrl } from "../market/launchpad.ts";
 import { deleteGroup, tokensByAddress } from "../store/db.ts";
@@ -45,11 +46,13 @@ async function digestCaption(event: BurnDigestEvent): Promise<string> {
     console.warn("Burn digest price lookup failed:", error);
   }
 
+  const burnAddr = normalizeAddress(BURN_ADDRESS);
   return [
     `🔥 <b>$${escapeHtml(watch.symbol)} burn digest</b>`,
     "",
     `Another <b>${escapeHtml(amount)}</b> ${escapeHtml(watch.symbol)}${escapeHtml(usdSuffix(amountUnits, priceUsd))} burned since last check (${escapeHtml(burns)}).`,
     `Total burned: <b>${escapeHtml(total)}</b>${escapeHtml(usdSuffix(totalUnits, priceUsd))}`,
+    `Burn: <code>${escapeHtml(burnAddr)}</code>`,
     "",
     `<a href="${launchUrl}">Open on launchpad</a>`,
   ].join("\n");

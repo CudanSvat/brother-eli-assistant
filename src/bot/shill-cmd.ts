@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
 import type { RpcProvider } from "starknet";
-import { DEGENZ_TOKEN } from "../config.ts";
+import { BURN_ADDRESS, DEGENZ_TOKEN } from "../config.ts";
 import { loadShillImage, renderShillCardPng } from "../chart/shill-card.ts";
 import {
   addressesEqual,
@@ -82,6 +82,7 @@ async function buildDegenzShill(): Promise<
 
     const launchUrl = launchpadTokenUrl(coin.address);
     const ca = normalizeAddress(coin.address);
+    const burnAddr = normalizeAddress(BURN_ADDRESS);
     const move = formatPct(coin.change24h);
     const hasHolders = coin.holders != null && Number.isFinite(coin.holders) && coin.holders > 0;
     const burnedUsd =
@@ -104,6 +105,7 @@ async function buildDegenzShill(): Promise<
     const caption = [
       `<b>$${escapeHtml(coin.symbol)}</b> · ${escapeHtml(coin.name)}`,
       `CA: <code>${escapeHtml(ca)}</code>`,
+      `Burn: <code>${escapeHtml(burnAddr)}</code>`,
       "",
       `MC ${formatUsd(coin.marketCap)} · Price ${formatTokenPrice(coin.priceUsd)}${move ? ` · 24h ${move}` : ""}`,
       metaLine,
