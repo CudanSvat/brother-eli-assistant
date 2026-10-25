@@ -156,7 +156,7 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
     busy = true;
     try {
       await ctx.reply(
-        "Launch sequence started: intro now, first draw in 5-15 minutes (must win, no smallest prize).",
+        "Launch sequence started: intro now, first draw in 1-5 minutes (must win, no smallest prize).",
       );
       const result = await runWheelLaunchSequence(bot, provider);
       await ctx.reply(

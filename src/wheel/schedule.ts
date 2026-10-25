@@ -24,10 +24,15 @@ function launchImagePath(): string | null {
 }
 
 const META_LAUNCH_DONE = "wheel_launch_done";
+const META_LAUNCH_INTRO_SENT = "wheel_launch_intro_sent";
+const META_LAUNCH_SPIN_AT = "wheel_launch_spin_at_ms";
 const META_NEXT_AT = "wheel_next_at_ms";
 const TZ = "Europe/Berlin";
 const WINDOW_START_HOUR = 17;
 const WINDOW_END_HOUR = 21; // exclusive upper bound for random pick
+/** Test-friendly delay; restore to 5–15 min for production launch. */
+const LAUNCH_DELAY_MIN_MS = 1 * 60_000;
+const LAUNCH_DELAY_MAX_MS = 5 * 60_000;
 
 export const WHEEL_LAUNCH_INTRO = [
   "Brother Eli Selects starts today.",
@@ -141,9 +146,10 @@ function writeNextAt(when: Date): void {
 }
 
 function randomLaunchDelayMs(): number {
-  const min = 5 * 60_000;
-  const max = 15 * 60_000;
-  return min + Math.floor(Math.random() * (max - min + 1));
+  return (
+    LAUNCH_DELAY_MIN_MS +
+    Math.floor(Math.random() * (LAUNCH_DELAY_MAX_MS - LAUNCH_DELAY_MIN_MS + 1))
+  );
 }
 
 let schedulerStarted = false;
@@ -154,7 +160,25 @@ async function targetChats(bot: Bot): Promise<number[]> {
   return resolveWheelTargetChatIds(bot.api, me.id);
 }
 
-/** Post intro → wait 5–15 min → forced-win spin (no smallest prize). */
+async function postLaunchIntro(bot: Bot, chatIds: number[]): Promise<void> {
+  const imagePath = launchImagePath();
+  for (const chatId of chatIds) {
+    try {
+      if (imagePath) {
+        await bot.api.sendPhoto(chatId, new InputFile(imagePath, "eli-selects-launch.jpg"), {
+          caption: WHEEL_LAUNCH_INTRO,
+        });
+      } else {
+        console.warn("Wheel launch image missing; sending text-only intro");
+        await bot.api.sendMessage(chatId, WHEEL_LAUNCH_INTRO);
+      }
+    } catch (error) {
+      console.warn(`Wheel launch intro failed for ${chatId}:`, error);
+    }
+  }
+}
+
+/** Post intro → wait 1–5 min (test) → forced-win spin (no smallest prize). */
 export async function runWheelLaunchSequence(
   bot: Bot,
   provider: RpcProvider,
@@ -165,29 +189,33 @@ export async function runWheelLaunchSequence(
     const chatIds = await targetChats(bot);
     if (!chatIds.length) return { ok: false, error: "no_chats" };
 
-    const imagePath = launchImagePath();
-    for (const chatId of chatIds) {
-      try {
-        if (imagePath) {
-          await bot.api.sendPhoto(chatId, new InputFile(imagePath, "eli-selects-launch.jpg"), {
-            caption: WHEEL_LAUNCH_INTRO,
-          });
-        } else {
-          console.warn("Wheel launch image missing; sending text-only intro");
-          await bot.api.sendMessage(chatId, WHEEL_LAUNCH_INTRO);
-        }
-      } catch (error) {
-        console.warn(`Wheel launch intro failed for ${chatId}:`, error);
+    const introAlready = getMeta(META_LAUNCH_INTRO_SENT) === "1";
+    let spinAt = Number(getMeta(META_LAUNCH_SPIN_AT) || "");
+    if (!Number.isFinite(spinAt) || spinAt <= 0) spinAt = 0;
+
+    if (!introAlready) {
+      await postLaunchIntro(bot, chatIds);
+      setMeta(META_LAUNCH_INTRO_SENT, "1");
+      spinAt = Date.now() + randomLaunchDelayMs();
+      setMeta(META_LAUNCH_SPIN_AT, String(spinAt));
+      const waitMin = Math.max(1, Math.round((spinAt - Date.now()) / 60_000));
+      console.log(`Wheel: launch intro sent; first draw at ${new Date(spinAt).toISOString()}`);
+      await notifyWheelOwners(
+        bot,
+        `<b>Eli Selects - launch day</b>\nIntro posted. First draw in ~${waitMin} min.`,
+      );
+    } else {
+      if (!spinAt) {
+        spinAt = Date.now() + randomLaunchDelayMs();
+        setMeta(META_LAUNCH_SPIN_AT, String(spinAt));
       }
+      console.log(
+        `Wheel: intro already sent (skip re-post); first draw at ${new Date(spinAt).toISOString()}`,
+      );
     }
 
-    const delayMs = randomLaunchDelayMs();
-    console.log(`Wheel: launch intro sent; first draw in ${Math.round(delayMs / 1000)}s`);
-    await notifyWheelOwners(
-      bot,
-      `<b>Eli Selects - launch day</b>\nIntro posted. First draw in ~${Math.round(delayMs / 60_000)} min.`,
-    );
-    await pause(delayMs);
+    const waitMs = Math.max(0, spinAt - Date.now());
+    if (waitMs > 0) await pause(waitMs);
 
     const result = await runWheelSpin(bot, provider, {
       chatIds,
