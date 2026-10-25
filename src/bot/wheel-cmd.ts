@@ -2,6 +2,7 @@ import type { Bot } from "grammy";
 import type { RpcProvider } from "starknet";
 import { config, isBotOwner } from "../config.ts";
 import { runWheelSpin } from "../wheel/run.ts";
+import { parseWheelVariant, variantHelp } from "../wheel/variants.ts";
 
 let busy = false;
 
@@ -36,13 +37,15 @@ export function registerWheelCommand(bot: Bot, provider: RpcProvider): void {
       return;
     }
 
+    const parsed = parseWheelVariant(ctx.match?.trim());
+    if (parsed == null) {
+      await ctx.reply(variantHelp());
+      return;
+    }
+
     busy = true;
     try {
-      const result = await runWheelSpin(bot, provider, ctx.chat.id);
-      if (!result.ok) {
-        // runWheelSpin already messaged the chat
-        return;
-      }
+      await runWheelSpin(bot, provider, ctx.chat.id, parsed);
     } finally {
       busy = false;
     }

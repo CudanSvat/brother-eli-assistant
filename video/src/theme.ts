@@ -1,0 +1,50 @@
+import { staticFile } from "remotion";
+
+/** Brother Eli site / scrapbook tokens (launchpad + shill card). */
+export const C = {
+  desk: "#e8e0cd",
+  paper: "#efe9dc",
+  paperSunk: "#f8f3e8",
+  ink: "#11120f",
+  muted: "#463e32",
+  rule: "#a3937a",
+  cobalt: "#1f4fe0",
+  cobaltInk: "#f3ecdc",
+  gold: "#f5d53a",
+  goldInk: "#11120f",
+  positive: "#157524",
+  negative: "#c4211b",
+  grid: "rgba(17, 18, 15, 0.08)",
+};
+
+export const fonts = {
+  elite: "SpecialElite, 'Courier New', monospace",
+  serif: "LibreBaskerville, Georgia, serif",
+};
+
+export const assets = {
+  cobalt: staticFile("textures/cobalt-paper.webp"),
+  tape: staticFile("textures/tape-280.webp"),
+  eli: staticFile("art/brother-eli.png"),
+  fontElite: staticFile("fonts/SpecialElite-Regular.ttf"),
+  fontSerif: staticFile("fonts/LibreBaskerville-Regular.ttf"),
+  fontSerifBold: staticFile("fonts/LibreBaskerville-Bold.ttf"),
+};
+
+export interface WheelProps {
+  title: string;
+  subtitle: string;
+  players: string[];
+  winner: string;
+  prizeLine: string;
+  hasWinner: boolean;
+}
+
+export const defaultWheelProps: WheelProps = {
+  title: "Brother Eli Wheel",
+  subtitle: "Daily $SLAY spin",
+  players: ["Eli #1", "Eli #42", "Eli #233", "1 SLAY", "2 SLAY", "3 SLAY", "4 SLAY"],
+  winner: "Eli #233",
+  prizeLine: "2 SLAY",
+  hasWinner: true,
+};

@@ -10,10 +10,14 @@ import {
   updateWheelSpin,
   type WheelSpinRow,
 } from "../store/db.ts";
-import { refreshEliHolders } from "./holders.ts";
+import { getCachedEliHolders, refreshEliHolders } from "./holders.ts";
 import { rollWheelOutcome } from "./outcome.ts";
 import { sendSlayPrize } from "./payout.ts";
 import { renderWheelVideo } from "./render.ts";
+import {
+  resolveCompositionId,
+  type WheelVariantKey,
+} from "./variants.ts";
 
 function pause(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -55,20 +59,26 @@ function resultCaption(spin: WheelSpinRow, payoutNote: string): string {
 }
 
 /**
- * Full test spin: refresh holders → roll → pre-render → post → edit → pin → dry-run/live pay.
+ * Full test spin: holders → roll → pre-render variant → post → edit → pin → dry-run/live pay.
  */
 export async function runWheelSpin(
   bot: Bot,
   provider: RpcProvider,
   chatId: number,
+  variantKey: WheelVariantKey | "random" = "random",
 ): Promise<{ ok: true; spinId: number } | { ok: false; error: string }> {
+  const { variant, compositionId } = resolveCompositionId(variantKey);
   const statusMsg = await bot.api.sendMessage(
     chatId,
-    "🎰 Preparing wheel (holders + animation)… this can take a minute.",
+    `🎰 Preparing <b>${variant}</b> spin (holders + animation)…`,
+    { parse_mode: "HTML" },
   );
 
   try {
-    const holders = await refreshEliHolders(provider);
+    let holders = getCachedEliHolders();
+    if (holders.length < 100) {
+      holders = await refreshEliHolders(provider);
+    }
     if (!holders.length) {
       await bot.api.editMessageText(
         chatId,
@@ -90,10 +100,11 @@ export async function runWheelSpin(
     await bot.api.editMessageText(
       chatId,
       statusMsg.message_id,
-      "🎰 Holders loaded. Pre-rendering wheel video…",
+      `🎰 Rendering <b>${variant}</b> (${compositionId})…`,
+      { parse_mode: "HTML" },
     );
 
-    const videoPath = await renderWheelVideo(outcome);
+    const videoPath = await renderWheelVideo(outcome, compositionId);
     spin =
       updateWheelSpin(spin.id, {
         videoPath,

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WheelOutcome } from "./outcome.ts";
+import type { WheelCompositionId } from "./variants.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const VIDEO_DIR = path.resolve(here, "../../video");
@@ -24,14 +25,16 @@ function propsFromOutcome(outcome: WheelOutcome): WheelVideoProps {
     subtitle: "Daily $SLAY spin",
     players: outcome.reelLabels,
     winner: outcome.winnerLabel,
-    prizeLine: outcome.hasWinner
-      ? `${outcome.prizeSlay} SLAY`
-      : "No prize today",
+    prizeLine: outcome.hasWinner ? `${outcome.prizeSlay} SLAY` : "No prize today",
     hasWinner: outcome.hasWinner,
   };
 }
 
-function runRender(inputPath: string, outputPath: string): Promise<void> {
+function runRender(
+  inputPath: string,
+  outputPath: string,
+  compositionId: WheelCompositionId,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "npx",
@@ -43,7 +46,7 @@ function runRender(inputPath: string, outputPath: string): Promise<void> {
         "--output",
         outputPath,
         "--composition",
-        "WheelOfFortune",
+        compositionId,
       ],
       {
         cwd: VIDEO_DIR,
@@ -80,10 +83,12 @@ function runRender(inputPath: string, outputPath: string): Promise<void> {
 }
 
 /**
- * Pre-render the Remotion wheel MP4 for this outcome.
- * Returns absolute path, or null if the video package is missing / render fails.
+ * Pre-render a Remotion wheel MP4 for this outcome + composition.
  */
-export async function renderWheelVideo(outcome: WheelOutcome): Promise<string | null> {
+export async function renderWheelVideo(
+  outcome: WheelOutcome,
+  compositionId: WheelCompositionId = "CobaltReel",
+): Promise<string | null> {
   if (!existsSync(path.join(VIDEO_DIR, "package.json"))) {
     console.warn("Wheel video package missing (video/package.json)");
     return null;
@@ -101,7 +106,7 @@ export async function renderWheelVideo(outcome: WheelOutcome): Promise<string | 
   writeFileSync(inputPath, JSON.stringify(propsFromOutcome(outcome)));
 
   try {
-    await runRender(inputPath, outputPath);
+    await runRender(inputPath, outputPath, compositionId);
     if (!existsSync(outputPath)) return null;
     return outputPath;
   } catch (error) {
