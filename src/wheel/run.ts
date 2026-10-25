@@ -22,20 +22,20 @@ function pause(ms: number): Promise<void> {
 
 function spoilerCaption(): string {
   return [
-    "🎰 <b>Brother Eli Wheel</b>",
+    "✨ <b>Eli Selects</b>",
     "",
-    "Spinning for today's $SLAY prize…",
-    "<i>Result reveals when the wheel stops.</i>",
+    "Eli is picking today's $SLAY winner…",
+    "<i>Result reveals when the reel stops.</i>",
   ].join("\n");
 }
 
 function resultCaption(spin: WheelSpinRow, payoutNote: string): string {
   if (!spin.hasWinner || spin.tokenId == null) {
     return [
-      "🎰 <b>Brother Eli Wheel</b>",
+      "✨ <b>Eli Selects</b>",
       "",
       "Result: <b>No winner</b> today.",
-      "Come back for the next spin.",
+      "Come back for the next draw.",
       "",
       payoutNote,
     ].join("\n");
@@ -44,7 +44,7 @@ function resultCaption(spin: WheelSpinRow, payoutNote: string): string {
   const urls = eliUrls(spin.tokenId);
   const owner = spin.ownerAddress ? shortAddress(spin.ownerAddress) : "—";
   return [
-    "🎰 <b>Brother Eli Wheel</b>",
+    "✨ <b>Eli Selects</b>",
     "",
     `Winner: <b>Eli #${spin.tokenId}</b>`,
     `Prize: <b>${spin.prizeSlay} SLAY</b>`,

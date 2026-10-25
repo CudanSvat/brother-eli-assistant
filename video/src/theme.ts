@@ -43,11 +43,11 @@ export interface WheelProps {
 }
 
 export const defaultWheelProps: WheelProps = {
-  title: "Brother Eli Wheel",
-  subtitle: "Daily $SLAY spin",
-  players: ["Eli #1", "Eli #42", "Eli #233", "1 SLAY", "2 SLAY", "3 SLAY", "4 SLAY"],
+  title: "Eli Selects",
+  subtitle: "Daily $SLAY draw",
+  players: ["Eli #1", "Eli #42", "Eli #233", "8 SLAY", "88 SLAY", "888 SLAY", "8888 SLAY"],
   winner: "Eli #233",
-  prizeLine: "2 SLAY",
+  prizeLine: "88 SLAY",
   hasWinner: true,
   winnerImageUrl: "https://brothereli.com/nft/images/233.png",
 };

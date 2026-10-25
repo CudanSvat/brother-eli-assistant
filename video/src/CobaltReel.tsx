@@ -206,7 +206,7 @@ export const CobaltReel: React.FC<WheelProps> = ({
               textTransform: "uppercase",
             }}
           >
-            Brother Eli · daily draw
+            Eli Selects · daily draw
           </div>
           <div
             style={{

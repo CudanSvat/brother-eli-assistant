@@ -66,8 +66,9 @@ export const ELI_COLLECTION =
   "0x062969ccea9a6740d66f2c9aab3f1466f75c5fe21f28355082e20ace7340a289";
 
 /**
- * Weighted prize tiers when a spin has a winner (SLAY units → relative weight).
- * 4 SLAY is rare. Override via WHEEL_PRIZE_WEIGHTS=1:50,2:30,3:15,4:5
+ * Weighted prize tiers when a spin has a winner (SLAY → relative weight).
+ * Default among wins: 8→50, 88→30, 888→15, 8888→2 (~2% jackpot after normalize).
+ * Override: WHEEL_PRIZE_WEIGHTS=8:50,88:30,888:15,8888:2
  */
 export const WHEEL_PRIZE_WEIGHTS: { prizeSlay: number; weight: number }[] = (() => {
   const raw = process.env.WHEEL_PRIZE_WEIGHTS?.trim();
@@ -82,10 +83,10 @@ export const WHEEL_PRIZE_WEIGHTS: { prizeSlay: number; weight: number }[] = (() 
     if (parsed.length) return parsed;
   }
   return [
-    { prizeSlay: 1, weight: 50 },
-    { prizeSlay: 2, weight: 30 },
-    { prizeSlay: 3, weight: 15 },
-    { prizeSlay: 4, weight: 5 },
+    { prizeSlay: 8, weight: 50 },
+    { prizeSlay: 88, weight: 30 },
+    { prizeSlay: 888, weight: 15 },
+    { prizeSlay: 8888, weight: 2 },
   ];
 })();
 

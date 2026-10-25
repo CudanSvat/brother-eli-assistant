@@ -27,8 +27,8 @@ function propsFromOutcome(outcome: WheelOutcome): WheelVideoProps {
       ? `${config.eliSiteOrigin}/nft/images/${outcome.tokenId}.png`
       : null;
   return {
-    title: "Brother Eli Wheel",
-    subtitle: "Daily $SLAY spin",
+    title: "Eli Selects",
+    subtitle: "Daily $SLAY draw",
     players: outcome.reelLabels,
     winner: outcome.winnerLabel,
     prizeLine: outcome.hasWinner ? `${outcome.prizeSlay} SLAY` : "No prize today",
