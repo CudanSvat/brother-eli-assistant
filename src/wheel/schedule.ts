@@ -30,9 +30,9 @@ const META_NEXT_AT = "wheel_next_at_ms";
 const TZ = "Europe/Berlin";
 const WINDOW_START_HOUR = 17;
 const WINDOW_END_HOUR = 21; // exclusive upper bound for random pick
-/** Test-friendly delay; restore to 5–15 min for production launch. */
-const LAUNCH_DELAY_MIN_MS = 1 * 60_000;
-const LAUNCH_DELAY_MAX_MS = 5 * 60_000;
+/** Launch-day gap between announcement and first spin. */
+const LAUNCH_DELAY_MIN_MS = 5 * 60_000;
+const LAUNCH_DELAY_MAX_MS = 15 * 60_000;
 
 export const WHEEL_LAUNCH_INTRO = [
   "Brother Eli Selects starts today.",
@@ -178,7 +178,7 @@ async function postLaunchIntro(bot: Bot, chatIds: number[]): Promise<void> {
   }
 }
 
-/** Post intro → wait 1–5 min (test) → forced-win spin (no smallest prize). */
+/** Post intro → wait 5–15 min → forced-win spin (no smallest prize). */
 export async function runWheelLaunchSequence(
   bot: Bot,
   provider: RpcProvider,
@@ -270,8 +270,9 @@ async function runScheduledDaily(
 }
 
 /**
- * Arms the daily clock (test bot: set WHEEL_DAILY=1).
- * Launch day runs on the first fire (or via /wheel_launch).
+ * Arms the daily clock (WHEEL_ENABLED + WHEEL_DAILY).
+ * If launch day is still pending, first fire is ~30s after boot (intro + 5–15 min spin).
+ * After that, draws are random in 17:00–21:00 Europe/Berlin.
  */
 export function startWheelScheduler(bot: Bot, provider: RpcProvider): void {
   if (!config.wheelEnabled || !config.wheelDaily) {
@@ -281,9 +282,11 @@ export function startWheelScheduler(bot: Bot, provider: RpcProvider): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
-  if (!readNextAt()) {
-    const next = pickNextDailyDrawAfter(new Date());
-    writeNextAt(next);
+  if (!isWheelLaunchDone()) {
+    // Go-live: don't wait until tomorrow's 17–21 window for day one.
+    writeNextAt(new Date(Date.now() + 30_000));
+  } else if (!readNextAt() || (readNextAt() ?? 0) < Date.now()) {
+    writeNextAt(pickNextDailyDrawAfter(new Date()));
   }
 
   const nextAt = readNextAt()!;

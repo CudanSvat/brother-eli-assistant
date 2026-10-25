@@ -61,10 +61,16 @@ export const config = {
    */
   wheelTestPrizes: /^(1|true|yes|on)$/i.test(process.env.WHEEL_TEST_PRIZES?.trim() || ""),
   /**
-   * Arm daily scheduler (17:00-21:00 Europe/Berlin). Test bot only until production.
+   * Arm daily scheduler (17:00-21:00 Europe/Berlin).
    * First fire runs launch-day intro + forced win; later fires are normal draws.
+   * If launch is still pending on boot, first fire is ~30s after start (not next evening).
    */
   wheelDaily: /^(1|true|yes|on)$/i.test(process.env.WHEEL_DAILY?.trim() || ""),
+  /**
+   * Owner DM commands (/wheel_test, /wheel_launch, /wheel_wallet). Off in production.
+   * /wheel_retry stays available silently for payout recovery.
+   */
+  wheelManual: /^(1|true|yes|on)$/i.test(process.env.WHEEL_MANUAL?.trim() || ""),
   /** Tip wallet (required only when WHEEL_LIVE). */
   slayTipAccountAddress: process.env.SLAY_TIP_ACCOUNT_ADDRESS?.trim() || "",
   slayTipPrivateKey: process.env.SLAY_TIP_PRIVATE_KEY?.trim() || "",
