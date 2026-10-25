@@ -1,7 +1,10 @@
 import { writeFileSync } from "node:fs";
+import { RpcProvider } from "starknet";
 import { loadShillImage, renderShillCardPng } from "../src/chart/shill-card.ts";
+import { config, SLAY_TOKEN } from "../src/config.ts";
+import { formatBurnAmount, getBurnedRaw, rawToUnits } from "../src/market/burn.ts";
+import { formatUsd } from "../src/lib/format.ts";
 import { getLaunchpadTokenByAddress, searchLaunchpadToken } from "../src/market/launchpad.ts";
-import { SLAY_TOKEN } from "../src/config.ts";
 
 async function main(): Promise<void> {
   const coin =
@@ -11,6 +14,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const provider = new RpcProvider({ nodeUrl: config.rpcUrl });
+  const burnedRaw = await getBurnedRaw(provider, coin.address);
+  const burned = rawToUnits(burnedRaw, 18);
+  const burnedUsd =
+    burned > 0 && coin.priceUsd != null && coin.priceUsd > 0 ? burned * coin.priceUsd : null;
+
   const image = await loadShillImage(coin.logo);
   console.log(
     "coin:",
@@ -19,6 +28,8 @@ async function main(): Promise<void> {
     "logo:",
     coin.logo ? "ok" : "none",
     image ? `${image.width}x${image.height}` : "no image",
+    "burned:",
+    burned > 0 ? `${formatBurnAmount(burned)} (${burnedUsd != null ? formatUsd(burnedUsd) : "—"})` : "none",
   );
 
   const png = await renderShillCardPng({
@@ -31,6 +42,7 @@ async function main(): Promise<void> {
     volumeUsd: coin.volumeUsd,
     change24h: coin.change24h,
     holders: coin.holders,
+    burned: burned > 0 ? burned : null,
     at: new Date("2026-10-21T12:00:00Z"),
   });
 

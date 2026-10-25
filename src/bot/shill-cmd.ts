@@ -84,9 +84,19 @@ async function buildDegenzShill(): Promise<
     const ca = normalizeAddress(coin.address);
     const move = formatPct(coin.change24h);
     const hasHolders = coin.holders != null && Number.isFinite(coin.holders) && coin.holders > 0;
+    const burnedUsd =
+      burnedUnits > 0 && coin.priceUsd != null && Number.isFinite(coin.priceUsd) && coin.priceUsd > 0
+        ? burnedUnits * coin.priceUsd
+        : null;
+    const burnedLine =
+      burnedUnits > 0
+        ? burnedUsd != null
+          ? `Burned ${formatBurnAmount(burnedUnits)} $${coin.symbol} (${formatUsd(burnedUsd)})`
+          : `Burned ${formatBurnAmount(burnedUnits)} $${coin.symbol}`
+        : null;
     const metaLine = [
       hasHolders ? `Holders ${Math.round(coin.holders!).toLocaleString("en-US")}` : null,
-      burnedUnits > 0 ? `Burned ${formatBurnAmount(burnedUnits)} $${coin.symbol}` : null,
+      burnedLine,
       `Vol ${formatUsd(coin.volumeUsd)}`,
     ]
       .filter(Boolean)

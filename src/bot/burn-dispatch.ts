@@ -1,8 +1,8 @@
 import type { Bot } from "grammy";
 import { GrammyError, InlineKeyboard } from "grammy";
-import { escapeHtml } from "../lib/format.ts";
+import { escapeHtml, formatUsd } from "../lib/format.ts";
 import { formatBurnAmount, rawToUnits } from "../market/burn.ts";
-import { launchpadTokenUrl } from "../market/launchpad.ts";
+import { getLaunchpadTokenByAddress, launchpadTokenUrl } from "../market/launchpad.ts";
 import { deleteGroup, tokensByAddress } from "../store/db.ts";
 import type { BurnDigestEvent } from "../indexer/burn-poller.ts";
 
@@ -20,19 +20,36 @@ function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function digestCaption(event: BurnDigestEvent): string {
+function usdSuffix(units: number, priceUsd: number | null): string {
+  if (priceUsd == null || !Number.isFinite(priceUsd) || priceUsd <= 0) return "";
+  const worth = units * priceUsd;
+  if (!Number.isFinite(worth) || worth <= 0) return "";
+  return ` (${formatUsd(worth)})`;
+}
+
+async function digestCaption(event: BurnDigestEvent): Promise<string> {
   const { watch, amountRaw, burnCount, totalBurnedRaw } = event;
-  const amount = formatBurnAmount(rawToUnits(amountRaw, watch.decimals));
-  const total = formatBurnAmount(rawToUnits(totalBurnedRaw, watch.decimals));
+  const amountUnits = rawToUnits(amountRaw, watch.decimals);
+  const totalUnits = rawToUnits(totalBurnedRaw, watch.decimals);
+  const amount = formatBurnAmount(amountUnits);
+  const total = formatBurnAmount(totalUnits);
   const burns =
     burnCount <= 1 ? "1 burn" : `${burnCount.toLocaleString("en-US")} burns`;
   const launchUrl = launchpadTokenUrl(watch.tokenAddress);
 
+  let priceUsd: number | null = null;
+  try {
+    const coin = await getLaunchpadTokenByAddress(watch.tokenAddress);
+    priceUsd = coin?.priceUsd ?? null;
+  } catch (error) {
+    console.warn("Burn digest price lookup failed:", error);
+  }
+
   return [
     `🔥 <b>$${escapeHtml(watch.symbol)} burn digest</b>`,
     "",
-    `Another <b>${escapeHtml(amount)}</b> ${escapeHtml(watch.symbol)} burned since last check (${escapeHtml(burns)}).`,
-    `Total burned: <b>${escapeHtml(total)}</b>`,
+    `Another <b>${escapeHtml(amount)}</b> ${escapeHtml(watch.symbol)}${escapeHtml(usdSuffix(amountUnits, priceUsd))} burned since last check (${escapeHtml(burns)}).`,
+    `Total burned: <b>${escapeHtml(total)}</b>${escapeHtml(usdSuffix(totalUnits, priceUsd))}`,
     "",
     `<a href="${launchUrl}">Open on launchpad</a>`,
   ].join("\n");
@@ -52,7 +69,7 @@ export function attachBurnDispatcher(bot: Bot) {
       return;
     }
 
-    const caption = digestCaption(event);
+    const caption = await digestCaption(event);
     const markup = new InlineKeyboard().url("Launchpad", launchpadTokenUrl(event.watch.tokenAddress));
 
     for (const chatId of chatIds) {

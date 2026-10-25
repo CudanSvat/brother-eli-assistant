@@ -579,9 +579,16 @@ export async function renderShillCardPng(input: ShillCardInput): Promise<Buffer>
   ];
   // Prefer burned over holders on the card when both exist (holders stay in the caption).
   if (input.burned != null && Number.isFinite(input.burned) && input.burned > 0) {
+    const burnedUsd =
+      input.priceUsd != null && Number.isFinite(input.priceUsd) && input.priceUsd > 0
+        ? input.burned * input.priceUsd
+        : null;
     stats.push({
       label: "BURNED",
-      value: `${formatBurnAmount(input.burned)} $${input.symbol}`,
+      value:
+        burnedUsd != null
+          ? `${formatBurnAmount(input.burned)} (${formatUsd(burnedUsd)})`
+          : `${formatBurnAmount(input.burned)} $${input.symbol}`,
     });
   } else if (input.holders != null && Number.isFinite(input.holders) && input.holders > 0) {
     stats.push({ label: "HOLDERS", value: formatHolders(input.holders) });
