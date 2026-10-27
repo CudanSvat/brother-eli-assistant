@@ -170,6 +170,20 @@ export const BURN_DIGEST_MS = (() => {
   }
   return 60 * 60_000; // 1 hour
 })();
+
+/**
+ * Minimum newly burned amount (whole tokens) before posting a digest.
+ * Below this, burns keep accumulating until the next check hits the threshold.
+ * Override via BURN_DIGEST_MIN.
+ */
+export const BURN_DIGEST_MIN = (() => {
+  const raw = process.env.BURN_DIGEST_MIN?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 50_000;
+})();
 export const SLAY_CHART_POOL =
   process.env.SLAY_CHART_POOL?.trim() ||
   "0x05a3febaff513632474af45ede4b0490af55195e201c3b3a67b2edd11afbb6bf";

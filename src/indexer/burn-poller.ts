@@ -1,5 +1,11 @@
 import { hash, type RpcProvider } from "starknet";
-import { BURN_ADDRESS, BURN_DIGEST_MS, DEGENZ_TOKEN, config } from "../config.ts";
+import {
+  BURN_ADDRESS,
+  BURN_DIGEST_MIN,
+  BURN_DIGEST_MS,
+  DEGENZ_TOKEN,
+  config,
+} from "../config.ts";
 import { addressesEqual, normalizeAddress, sleep } from "../lib/format.ts";
 import { getBurnedRaw } from "../market/burn.ts";
 import { getMeta, setMeta } from "../store/db.ts";
@@ -13,6 +19,8 @@ export interface BurnWatch {
   symbol: string;
   decimals: number;
   digestMs: number;
+  /** Minimum newly burned whole tokens before a digest posts. */
+  minUnits: number;
 }
 
 export const DEGENZ_BURN_WATCH: BurnWatch = {
@@ -20,6 +28,7 @@ export const DEGENZ_BURN_WATCH: BurnWatch = {
   symbol: "DEGENZ",
   decimals: 18,
   digestMs: BURN_DIGEST_MS,
+  minUnits: BURN_DIGEST_MIN,
 };
 
 export interface BurnDigestEvent {
@@ -180,6 +189,10 @@ async function pollWatch(
   const due = Date.now() - state.lastFlushAt >= watch.digestMs;
   const pending = BigInt(state.pendingRaw || "0");
   if (!due || pending <= 0n) return;
+
+  // Skip tiny windows — keep accumulating until the new burn amount clears the floor.
+  const minRaw = BigInt(Math.floor(watch.minUnits)) * 10n ** BigInt(watch.decimals);
+  if (pending < minRaw) return;
 
   const totalBurnedRaw = await getBurnedRaw(provider, watch.tokenAddress);
 
